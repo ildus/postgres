@@ -94,7 +94,6 @@ expand_tsvector(Datum vectorDatum, MemoryContext parentcontext)
 char *
 tsvector_getlexeme(TSVectorExpanded vec, int idx, WordEntry **we)
 {
-	WordEntry	   *entry;
 	char		   *lexeme;
 	MemoryContext	oldcxt;
 	int32			pos,
