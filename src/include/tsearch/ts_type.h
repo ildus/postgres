@@ -14,6 +14,7 @@
 
 #include "fmgr.h"
 #include "utils/memutils.h"
+#include "utils/expandeddatum.h"
 
 
 /*
@@ -41,13 +42,13 @@
 typedef struct
 {
 	uint32
-				haspos:1,
-				len:11,			/* MAX 2Kb */
-				pos:20;			/* MAX 1Mb */
+		len:11,
+		npos:16,
+		_unused:5;
 } WordEntry;
 
 #define MAXSTRLEN ( (1<<11) - 1)
-#define MAXSTRPOS ( (1<<20) - 1)
+#define MAXSTRPOS ( (1<<30) - 1)
 
 extern int	compareWordEntryPos(const void *a, const void *b);
 
@@ -99,12 +100,33 @@ typedef struct
 typedef struct
 {
 	int32		vl_len_;		/* varlena header (do not touch directly!) */
-	int32		size;
+	int32		size_;
 	WordEntry	entries[FLEXIBLE_ARRAY_MEMBER];
 	/* lexemes follow the entries[] array */
 } TSVectorData;
 
 typedef TSVectorData *TSVector;
+
+typedef struct ExpandedTSVectorHeader
+{
+	/* Standart header for expanded objects */
+	ExpandedObjectHeader hdr;
+
+	/* Magic value identifying an expanded tsvector (for debugging only) */
+	uint32		ev_magic;
+
+	Datum		datum;		/* original datum */
+	WordEntry  *entries;
+	uint32		count;		/* lexemes count */
+	uint32	   *positions;	/* entry positions cache, calculated */
+	size_t		maxidx;		/* count of calculated indices */
+} ExpandedTSVectorHeader;
+
+typedef ExpandedTSVectorHeader *TSVectorExpanded;
+
+#define TS_FLAG_EXPANDED 0x80000000
+#define TS_COUNT(t) ((t)->size_ & 0x0FFFFFFF)
+#define TS_SETCOUNT(t,c) ((t)->size_ = (c) | TS_FLAG_EXPANDED)
 
 #define DATAHDRSIZE (offsetof(TSVectorData, entries))
 #define CALCDATASIZE(nentries, lenstr) (DATAHDRSIZE + (nentries) * sizeof(WordEntry) + (lenstr) )
@@ -113,11 +135,18 @@ typedef TSVectorData *TSVector;
 #define ARRPTR(x)	( (x)->entries )
 
 /* pointer to start of a tsvector's lexeme storage */
-#define STRPTR(x)	( (char *) &(x)->entries[(x)->size] )
+#define STRPTR(x)	( (char *) &(x)->entries[TS_COUNT(x)] )
 
-#define _POSVECPTR(x, e)	((WordEntryPosVector *)(STRPTR(x) + SHORTALIGN((e)->pos + (e)->len)))
-#define POSDATALEN(x,e) ( ( (e)->haspos ) ? (_POSVECPTR(x,e)->npos) : 0 )
-#define POSDATAPTR(x,e) (_POSVECPTR(x,e)->pos)
+/*
+ * pointer to start of positions, requires lexeme pointer
+ * and length of lexeme
+ */
+#define POSDATAPTR(lex,len) ((WordEntryPos *)((lex) + SHORTALIGN(len)))
+
+/* increments WordEntry pointer and moves pos to next lexeme position */
+#define INCRPTR(e,pos) \
+	(pos = ((e)->npos == 0) ? (pos) + (e)->len : \
+		SHORTALIGN((pos) + (e)->len) + (e)->npos * sizeof(WordEntryPos), (e)++)
 
 /*
  * fmgr interface macros
@@ -130,6 +159,9 @@ typedef TSVectorData *TSVector;
 #define PG_GETARG_TSVECTOR_COPY(n)	DatumGetTSVectorCopy(PG_GETARG_DATUM(n))
 #define PG_RETURN_TSVECTOR(x)		return TSVectorGetDatum(x)
 
+/* fmgr macros for expanded tsvector objects */
+#define PG_GETARG_EXPANDED_TSVECTOR(n) \
+	DatumGetExpandedTSVector(PG_GETARG_DATUM(n))
 
 /*
  * TSQuery
@@ -247,5 +279,8 @@ typedef TSQueryData *TSQuery;
 #define PG_GETARG_TSQUERY(n)		DatumGetTSQuery(PG_GETARG_DATUM(n))
 #define PG_GETARG_TSQUERY_COPY(n)	DatumGetTSQueryCopy(PG_GETARG_DATUM(n))
 #define PG_RETURN_TSQUERY(x)		return TSQueryGetDatum(x)
+
+ExpandedTSVectorHeader *DatumGetExpandedTSVector(Datum d);
+extern TSVector tsvector_upgrade(Datum);
 
 #endif   /* _PG_TSTYPE_H_ */
