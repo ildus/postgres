@@ -188,32 +188,35 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 	{							/* tsvector */
 		SignTSVector *res;
 		TSVector	val = DatumGetTSVector(entry->key);
-		int32		len;
+		int32		len,
+					pos = 0;
 		int32	   *arr;
 		WordEntry  *ptr = ARRPTR(val);
 		char	   *words = STRPTR(val);
+		const int	tscount = TS_COUNT(val);
 
-		len = CALCGTSIZE(ARRKEY, val->size);
+		len = CALCGTSIZE(ARRKEY, tscount);
 		res = (SignTSVector *) palloc(len);
 		SET_VARSIZE(res, len);
 		res->flag = ARRKEY;
 		arr = GETARR(res);
-		len = val->size;
+		len = tscount;
 		while (len--)
 		{
 			pg_crc32	c;
 
 			INIT_LEGACY_CRC32(c);
-			COMP_LEGACY_CRC32(c, words + ptr->pos, ptr->len);
+			COMP_LEGACY_CRC32(c, words + pos, ptr->len);
 			FIN_LEGACY_CRC32(c);
 
 			*arr = *(int32 *) &c;
 			arr++;
-			ptr++;
+
+			INCRPTR(ptr, pos);
 		}
 
-		len = uniqueint(GETARR(res), val->size);
-		if (len != val->size)
+		len = uniqueint(GETARR(res), tscount);
+		if (len != tscount)
 		{
 			/*
 			 * there is a collision of hash-function; len is always less than

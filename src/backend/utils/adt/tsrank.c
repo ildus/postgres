@@ -35,8 +35,8 @@ static const float weights[] = {0.1f, 0.2f, 0.4f, 1.0f};
 #define RANK_NORM_RDIVRPLUS1	0x20
 #define DEF_NORM_METHOD			RANK_NO_NORM
 
-static float calc_rank_or(const float *w, TSVector t, TSQuery q);
-static float calc_rank_and(const float *w, TSVector t, TSQuery q);
+static float calc_rank_or(const float *w, TSVectorExpanded t, TSQuery q);
+static float calc_rank_and(const float *w, TSVectorExpanded t, TSQuery q);
 
 /*
  * Returns a weight of a word collocation
@@ -51,31 +51,16 @@ word_distance(int32 w)
 }
 
 static int
-cnt_length(TSVector t)
+cnt_length(TSVectorExpanded t)
 {
-	WordEntry  *ptr = ARRPTR(t),
-			   *end = (WordEntry *) STRPTR(t);
-	int			len = 0;
+	int		i,
+			len = 0;
 
-	while (ptr < end)
-	{
-		int			clen = POSDATALEN(t, ptr);
-
-		if (clen == 0)
-			len += 1;
-		else
-			len += clen;
-
-		ptr++;
-	}
+	for (i = 0; i < t->count; i++)
+		len += (t->entries[i].npos == 0) ? 1 : t->entries[i].npos;
 
 	return len;
 }
-
-
-#define WordECompareQueryItem(e,q,p,i,m) \
-	tsCompareString((q) + (i)->distance, (i)->length,	\
-					(e) + (p)->pos, (p)->len, (m))
 
 
 /*
@@ -83,13 +68,19 @@ cnt_length(TSVector t)
  * tsvector 't'. 'q' is the TSQuery containing 'item'.
  * Returns NULL if not found.
  */
-static WordEntry *
-find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
+static int
+find_wordentry(TSVectorExpanded t, TSQuery q, QueryOperand *item, int32 *nitem)
 {
-	WordEntry  *StopLow = ARRPTR(t);
-	WordEntry  *StopHigh = (WordEntry *) STRPTR(t);
-	WordEntry  *StopMiddle = StopHigh;
-	int			difference;
+#define WordECompareQueryItem(s,l,q,i,m) \
+	tsCompareString((q) + (i)->distance, (i)->length,	\
+					s, l, (m))
+
+	int StopLow = 0;
+	int StopHigh = t->count;
+	int StopMiddle = StopHigh;
+	int	difference;
+	char *lexeme;
+	WordEntry *we;
 
 	*nitem = 0;
 
@@ -97,7 +88,11 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 	while (StopLow < StopHigh)
 	{
 		StopMiddle = StopLow + (StopHigh - StopLow) / 2;
-		difference = WordECompareQueryItem(STRPTR(t), GETOPERAND(q), StopMiddle, item, false);
+		lexeme = tsvector_getlexeme(t, StopMiddle, &we);
+
+		difference = WordECompareQueryItem(lexeme, we->len,
+			GETOPERAND(q), item, false);
+
 		if (difference == 0)
 		{
 			StopHigh = StopMiddle;
@@ -117,17 +112,19 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 
 		*nitem = 0;
 
-		while (StopMiddle < (WordEntry *) STRPTR(t) &&
-			   WordECompareQueryItem(STRPTR(t), GETOPERAND(q), StopMiddle, item, true) == 0)
+		while (StopMiddle < t->count)
 		{
+			lexeme = tsvector_getlexeme(t, StopMiddle, &we);
+			if (WordECompareQueryItem(lexeme, we->len, GETOPERAND(q), item, true) != 0)
+				break;
+
 			(*nitem)++;
 			StopMiddle++;
 		}
 	}
 
-	return (*nitem > 0) ? StopHigh : NULL;
+	return (*nitem > 0) ? StopHigh : -1;
 }
-
 
 /*
  * sort QueryOperands by (length, word)
@@ -198,17 +195,15 @@ SortAndUniqItems(TSQuery q, int *size)
 }
 
 static float
-calc_rank_and(const float *w, TSVector t, TSQuery q)
+calc_rank_and(const float *w, TSVectorExpanded t, TSQuery q)
 {
-	WordEntryPosVector **pos;
-	WordEntryPosVector1 posnull;
-	WordEntryPosVector *POSNULL;
+	WordEntryPos **pos;
+	uint16 *npos;
+	WordEntryPos posnull[1] = {0};
 	int			i,
 				k,
 				l,
 				p;
-	WordEntry  *entry,
-			   *firstentry;
 	WordEntryPos *post,
 			   *ct;
 	int32		dimt,
@@ -225,41 +220,53 @@ calc_rank_and(const float *w, TSVector t, TSQuery q)
 		pfree(item);
 		return calc_rank_or(w, t, q);
 	}
-	pos = (WordEntryPosVector **) palloc0(sizeof(WordEntryPosVector *) * q->size);
+	pos = (WordEntryPos **) palloc0(sizeof(WordEntryPos *) * q->size);
+	npos = (uint16 *) palloc0(sizeof(uint16) * q->size);
 
-	/* A dummy WordEntryPos array to use when haspos is false */
-	posnull.npos = 1;
-	posnull.pos[0] = 0;
-	WEP_SETPOS(posnull.pos[0], MAXENTRYPOS - 1);
-	POSNULL = (WordEntryPosVector *) &posnull;
+	/* posnull is a dummy WordEntryPos array to use when npos == 0 */
+	WEP_SETPOS(posnull[0], MAXENTRYPOS - 1);
 
 	for (i = 0; i < size; i++)
 	{
-		firstentry = entry = find_wordentry(t, q, item[i], &nitem);
-		if (!entry)
+		int   idx = find_wordentry(t, q, item[i], &nitem),
+			  firstidx;
+
+		if (idx == -1)
 			continue;
 
-		while (entry - firstentry < nitem)
-		{
-			if (entry->haspos)
-				pos[i] = _POSVECPTR(t, entry);
-			else
-				pos[i] = POSNULL;
+		firstidx = idx;
 
-			dimt = pos[i]->npos;
-			post = pos[i]->pos;
+		while (idx - firstidx < nitem)
+		{
+			WordEntry *entry;
+
+			char *lexeme = tsvector_getlexeme(t, idx, &entry);
+			if (entry->npos)
+			{
+				pos[i] = POSDATAPTR(lexeme, entry->len);
+				npos[i] = entry->npos;
+			}
+			else
+			{
+				pos[i] = posnull;
+				npos[i] = 1;
+			}
+
+			post = pos[i];
+			dimt = npos[i];
+
 			for (k = 0; k < i; k++)
 			{
 				if (!pos[k])
 					continue;
-				lenct = pos[k]->npos;
-				ct = pos[k]->pos;
+				lenct = npos[k];
+				ct = pos[k];
 				for (l = 0; l < dimt; l++)
 				{
 					for (p = 0; p < lenct; p++)
 					{
 						dist = Abs((int) WEP_GETPOS(post[l]) - (int) WEP_GETPOS(ct[p]));
-						if (dist || (dist == 0 && (pos[i] == POSNULL || pos[k] == POSNULL)))
+						if (dist || (dist == 0 && (pos[i] == posnull || pos[k] == posnull)))
 						{
 							float		curw;
 
@@ -272,20 +279,20 @@ calc_rank_and(const float *w, TSVector t, TSQuery q)
 				}
 			}
 
-			entry++;
+			idx++;
 		}
 	}
 	pfree(pos);
+	pfree(npos);
 	pfree(item);
 	return res;
 }
 
 static float
-calc_rank_or(const float *w, TSVector t, TSQuery q)
+calc_rank_or(const float *w, TSVectorExpanded t, TSQuery q)
 {
-	WordEntry  *entry,
-			   *firstentry;
-	WordEntryPosVector1 posnull;
+	/* A dummy WordEntryPos array to use when lexeme hasn't positions */
+	WordEntryPos posnull[1] = {0};
 	WordEntryPos *post;
 	int32		dimt,
 				j,
@@ -295,33 +302,34 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 	QueryOperand **item;
 	int			size = q->size;
 
-	/* A dummy WordEntryPos array to use when haspos is false */
-	posnull.npos = 1;
-	posnull.pos[0] = 0;
-
 	item = SortAndUniqItems(q, &size);
 
 	for (i = 0; i < size; i++)
 	{
+		int         idx  , firstidx;
 		float		resj,
 					wjm;
-		int32		jm;
+		int32       jm;
 
-		firstentry = entry = find_wordentry(t, q, item[i], &nitem);
-		if (!entry)
+		idx = find_wordentry(t, q, item[i], &nitem);
+		if (idx == -1)
 			continue;
 
-		while (entry - firstentry < nitem)
+		firstidx = idx;
+
+		while (idx - firstidx < nitem)
 		{
-			if (entry->haspos)
+			WordEntry *entry;
+			char *lexeme = tsvector_getlexeme(t, idx, &entry);
+			if (entry->npos)
 			{
-				dimt = POSDATALEN(t, entry);
-				post = POSDATAPTR(t, entry);
+				dimt = entry->npos;
+				post = POSDATAPTR(lexeme, entry->len);
 			}
 			else
 			{
-				dimt = posnull.npos;
-				post = posnull.pos;
+				dimt = 1;
+				post = posnull;
 			}
 
 			resj = 0.0;
@@ -345,7 +353,7 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 */
 			res = res + (wjm + resj - wjm / ((jm + 1) * (jm + 1))) / 1.64493406685;
 
-			entry++;
+			idx++;
 		}
 	}
 	if (size > 0)
@@ -355,13 +363,13 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 }
 
 static float
-calc_rank(const float *w, TSVector t, TSQuery q, int32 method)
+calc_rank(const float *w, TSVectorExpanded t, TSQuery q, int32 method)
 {
 	QueryItem  *item = GETQUERY(q);
 	float		res = 0.0;
 	int			len;
 
-	if (!t->size || !q->size)
+	if (!t->count || !q->size)
 		return 0.0;
 
 	/* XXX: What about NOT? */
@@ -373,7 +381,7 @@ calc_rank(const float *w, TSVector t, TSQuery q, int32 method)
 	if (res < 0)
 		res = 1e-20f;
 
-	if ((method & RANK_NORM_LOGLENGTH) && t->size > 0)
+	if ((method & RANK_NORM_LOGLENGTH) && t->count > 0)
 		res /= log((double) (cnt_length(t) + 1)) / log(2.0);
 
 	if (method & RANK_NORM_LENGTH)
@@ -385,11 +393,11 @@ calc_rank(const float *w, TSVector t, TSQuery q, int32 method)
 
 	/* RANK_NORM_EXTDIST not applicable */
 
-	if ((method & RANK_NORM_UNIQ) && t->size > 0)
-		res /= (float) (t->size);
+	if ((method & RANK_NORM_UNIQ) && t->count > 0)
+		res /= (float) (t->count);
 
-	if ((method & RANK_NORM_LOGUNIQ) && t->size > 0)
-		res /= log((double) (t->size + 1)) / log(2.0);
+	if ((method & RANK_NORM_LOGUNIQ) && t->count > 0)
+		res /= log((double) (t->count + 1)) / log(2.0);
 
 	if (method & RANK_NORM_RDIVRPLUS1)
 		res /= (res + 1);
@@ -438,11 +446,11 @@ getWeights(ArrayType *win)
 Datum
 ts_rank_wttf(PG_FUNCTION_ARGS)
 {
-	ArrayType  *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
-	TSVector	txt = PG_GETARG_TSVECTOR(1);
-	TSQuery		query = PG_GETARG_TSQUERY(2);
-	int			method = PG_GETARG_INT32(3);
-	float		res;
+	ArrayType		   *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+	TSVectorExpanded	txt = PG_GETARG_EXPANDED_TSVECTOR(1);
+	TSQuery				query = PG_GETARG_TSQUERY(2);
+	int					method = PG_GETARG_INT32(3);
+	float				res;
 
 	res = calc_rank(getWeights(win), txt, query, method);
 
@@ -455,10 +463,10 @@ ts_rank_wttf(PG_FUNCTION_ARGS)
 Datum
 ts_rank_wtt(PG_FUNCTION_ARGS)
 {
-	ArrayType  *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
-	TSVector	txt = PG_GETARG_TSVECTOR(1);
-	TSQuery		query = PG_GETARG_TSQUERY(2);
-	float		res;
+	ArrayType		   *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+	TSVectorExpanded	txt = PG_GETARG_EXPANDED_TSVECTOR(1);
+	TSQuery				query = PG_GETARG_TSQUERY(2);
+	float				res;
 
 	res = calc_rank(getWeights(win), txt, query, DEF_NORM_METHOD);
 
@@ -471,10 +479,10 @@ ts_rank_wtt(PG_FUNCTION_ARGS)
 Datum
 ts_rank_ttf(PG_FUNCTION_ARGS)
 {
-	TSVector	txt = PG_GETARG_TSVECTOR(0);
-	TSQuery		query = PG_GETARG_TSQUERY(1);
-	int			method = PG_GETARG_INT32(2);
-	float		res;
+	TSVectorExpanded	txt = PG_GETARG_EXPANDED_TSVECTOR(0);
+	TSQuery				query = PG_GETARG_TSQUERY(1);
+	int					method = PG_GETARG_INT32(2);
+	float				res;
 
 	res = calc_rank(getWeights(NULL), txt, query, method);
 
@@ -486,9 +494,9 @@ ts_rank_ttf(PG_FUNCTION_ARGS)
 Datum
 ts_rank_tt(PG_FUNCTION_ARGS)
 {
-	TSVector	txt = PG_GETARG_TSVECTOR(0);
-	TSQuery		query = PG_GETARG_TSQUERY(1);
-	float		res;
+	TSVectorExpanded	txt = PG_GETARG_EXPANDED_TSVECTOR(0);
+	TSQuery				query = PG_GETARG_TSQUERY(1);
+	float				res;
 
 	res = calc_rank(getWeights(NULL), txt, query, DEF_NORM_METHOD);
 
@@ -721,7 +729,7 @@ Cover(DocRepresentation *doc, int len, QueryRepresentation *qr, CoverExt *ext)
 }
 
 static DocRepresentation *
-get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
+get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 {
 	QueryItem  *item = GETQUERY(qr->query);
 	WordEntry  *entry,
@@ -743,29 +751,33 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 	 */
 	for (i = 0; i < qr->query->size; i++)
 	{
-		QueryOperand *curoperand;
+		int				idx;
+		QueryOperand   *curoperand;
 
 		if (item[i].type != QI_VAL)
 			continue;
 
 		curoperand = &item[i].qoperand;
 
-		firstentry = entry = find_wordentry(txt, qr->query, curoperand, &nitem);
-		if (!entry)
+		idx = find_wordentry(txt, qr->query, curoperand, &nitem);
+		if (idx < 0)
 			continue;
 
 		/* iterations over entries in tsvector */
 		while (entry - firstentry < nitem)
 		{
-			if (entry->haspos)
+			WordEntry	*entry;
+			char		*lex = tsvector_getlexeme(txt, idx, &entry);
+
+			if (entry->npos)
 			{
-				dimt = POSDATALEN(txt, entry);
-				post = POSDATAPTR(txt, entry);
+				dimt = entry->npos;
+				post = POSDATAPTR(lex, entry->len);
 			}
 			else
 			{
 				/* ignore words without positions */
-				entry++;
+				idx++;
 				continue;
 			}
 
@@ -844,7 +856,7 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 }
 
 static float4
-calc_rank_cd(const float4 *arrdata, TSVector txt, TSQuery query, int method)
+calc_rank_cd(const float4 *arrdata, TSVectorExpanded txt, TSQuery query, int method)
 {
 	DocRepresentation *doc;
 	int			len,
@@ -917,7 +929,7 @@ calc_rank_cd(const float4 *arrdata, TSVector txt, TSQuery query, int method)
 		NExtent++;
 	}
 
-	if ((method & RANK_NORM_LOGLENGTH) && txt->size > 0)
+	if ((method & RANK_NORM_LOGLENGTH) && txt->count > 0)
 		Wdoc /= log((double) (cnt_length(txt) + 1));
 
 	if (method & RANK_NORM_LENGTH)
@@ -930,11 +942,11 @@ calc_rank_cd(const float4 *arrdata, TSVector txt, TSQuery query, int method)
 	if ((method & RANK_NORM_EXTDIST) && NExtent > 0 && SumDist > 0)
 		Wdoc /= ((double) NExtent) / SumDist;
 
-	if ((method & RANK_NORM_UNIQ) && txt->size > 0)
-		Wdoc /= (double) (txt->size);
+	if ((method & RANK_NORM_UNIQ) && txt->count > 0)
+		Wdoc /= (double) (txt->count);
 
-	if ((method & RANK_NORM_LOGUNIQ) && txt->size > 0)
-		Wdoc /= log((double) (txt->size + 1)) / log(2.0);
+	if ((method & RANK_NORM_LOGUNIQ) && txt->count > 0)
+		Wdoc /= log((double) (txt->count + 1)) / log(2.0);
 
 	if (method & RANK_NORM_RDIVRPLUS1)
 		Wdoc /= (Wdoc + 1);

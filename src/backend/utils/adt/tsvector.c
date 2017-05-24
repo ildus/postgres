@@ -22,9 +22,9 @@
 
 typedef struct
 {
-	WordEntry	entry;			/* must be first! */
-	WordEntryPos *pos;
-	int			poslen;			/* number of elements in pos */
+	WordEntry		entry;			/* must be first! */
+	size_t			offset;			/* offset of lexeme in some buffer */
+	WordEntryPos   *pos;
 } WordEntryIN;
 
 
@@ -85,8 +85,8 @@ compareentry(const void *va, const void *vb, void *arg)
 	const WordEntryIN *b = (const WordEntryIN *) vb;
 	char	   *BufferStr = (char *) arg;
 
-	return tsCompareString(&BufferStr[a->entry.pos], a->entry.len,
-						   &BufferStr[b->entry.pos], b->entry.len,
+	return tsCompareString(&BufferStr[a->offset], a->entry.len,
+						   &BufferStr[b->offset], b->entry.len,
 						   false);
 }
 
@@ -113,41 +113,39 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 	while (ptr - a < l)
 	{
 		if (!(ptr->entry.len == res->entry.len &&
-			  strncmp(&buf[ptr->entry.pos], &buf[res->entry.pos],
-					  res->entry.len) == 0))
+			  strncmp(&buf[ptr->offset], &buf[res->offset], res->entry.len) == 0))
 		{
 			/* done accumulating data into *res, count space needed */
 			buflen += res->entry.len;
-			if (res->entry.haspos)
+			if (res->entry.npos)
 			{
-				res->poslen = uniquePos(res->pos, res->poslen);
+				res->entry.npos = uniquePos(res->pos, res->entry.npos);
 				buflen = SHORTALIGN(buflen);
-				buflen += res->poslen * sizeof(WordEntryPos) + sizeof(uint16);
+				buflen += res->entry.npos * sizeof(WordEntryPos);
 			}
 			res++;
 			if (res != ptr)
 				memcpy(res, ptr, sizeof(WordEntryIN));
 		}
-		else if (ptr->entry.haspos)
+		else if (ptr->entry.npos)
 		{
-			if (res->entry.haspos)
+			if (res->entry.npos)
 			{
 				/* append ptr's positions to res's positions */
-				int			newlen = ptr->poslen + res->poslen;
+				int newlen = ptr->entry.npos + res->entry.npos;
 
 				res->pos = (WordEntryPos *)
 					repalloc(res->pos, newlen * sizeof(WordEntryPos));
-				memcpy(&res->pos[res->poslen], ptr->pos,
-					   ptr->poslen * sizeof(WordEntryPos));
-				res->poslen = newlen;
+				memcpy(&res->pos[res->entry.npos], ptr->pos,
+					   ptr->entry.npos * sizeof(WordEntryPos));
+				res->entry.npos = newlen;
 				pfree(ptr->pos);
 			}
 			else
 			{
 				/* just give ptr's positions to pos */
-				res->entry.haspos = 1;
+				res->entry.npos = ptr->entry.npos;
 				res->pos = ptr->pos;
-				res->poslen = ptr->poslen;
 			}
 		}
 		ptr++;
@@ -155,11 +153,11 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 
 	/* count space needed for last item */
 	buflen += res->entry.len;
-	if (res->entry.haspos)
+	if (res->entry.npos)
 	{
-		res->poslen = uniquePos(res->pos, res->poslen);
+		res->entry.npos = uniquePos(res->pos, res->entry.npos);
 		buflen = SHORTALIGN(buflen);
-		buflen += res->poslen * sizeof(WordEntryPos) + sizeof(uint16);
+		buflen += res->entry.npos * sizeof(WordEntryPos);
 	}
 
 	*outbuflen = buflen;
@@ -239,22 +237,11 @@ tsvectorin(PG_FUNCTION_ARGS)
 			cur = tmpbuf + dist;
 		}
 		arr[len].entry.len = toklen;
-		arr[len].entry.pos = cur - tmpbuf;
+		arr[len].offset = cur - tmpbuf;
+		arr[len].entry.npos = poslen;
+		arr[len].pos = (poslen != 0)? pos : NULL;
 		memcpy((void *) cur, (void *) token, toklen);
 		cur += toklen;
-
-		if (poslen != 0)
-		{
-			arr[len].entry.haspos = 1;
-			arr[len].pos = pos;
-			arr[len].poslen = poslen;
-		}
-		else
-		{
-			arr[len].entry.haspos = 0;
-			arr[len].pos = NULL;
-			arr[len].poslen = 0;
-		}
 		len++;
 	}
 
@@ -273,28 +260,25 @@ tsvectorin(PG_FUNCTION_ARGS)
 	totallen = CALCDATASIZE(len, buflen);
 	in = (TSVector) palloc0(totallen);
 	SET_VARSIZE(in, totallen);
-	in->size = len;
+	TS_SETCOUNT(in, len);
 	inarr = ARRPTR(in);
 	strbuf = STRPTR(in);
 	stroff = 0;
 	for (i = 0; i < len; i++)
 	{
-		memcpy(strbuf + stroff, &tmpbuf[arr[i].entry.pos], arr[i].entry.len);
-		arr[i].entry.pos = stroff;
+		memcpy(strbuf + stroff, &tmpbuf[arr[i].offset], arr[i].entry.len);
 		stroff += arr[i].entry.len;
-		if (arr[i].entry.haspos)
+		if (arr[i].entry.npos)
 		{
-			if (arr[i].poslen > 0xFFFF)
+			if (arr[i].entry.npos > 0xFFFF)
 				elog(ERROR, "positions array too long");
 
 			/* Copy number of positions */
 			stroff = SHORTALIGN(stroff);
-			*(uint16 *) (strbuf + stroff) = (uint16) arr[i].poslen;
-			stroff += sizeof(uint16);
 
 			/* Copy positions */
-			memcpy(strbuf + stroff, arr[i].pos, arr[i].poslen * sizeof(WordEntryPos));
-			stroff += arr[i].poslen * sizeof(WordEntryPos);
+			memcpy(strbuf + stroff, arr[i].pos, arr[i].entry.npos * sizeof(WordEntryPos));
+			stroff += arr[i].entry.npos * sizeof(WordEntryPos);
 
 			pfree(arr[i].pos);
 		}
@@ -313,24 +297,26 @@ tsvectorout(PG_FUNCTION_ARGS)
 	char	   *outbuf;
 	int32		i,
 				lenbuf = 0,
-				pp;
+				pos = 0,
+				pp,
+				tscount = TS_COUNT(out);
 	WordEntry  *ptr = ARRPTR(out);
 	char	   *curbegin,
 			   *curin,
 			   *curout;
 
-	lenbuf = out->size * 2 /* '' */ + out->size - 1 /* space */ + 2 /* \0 */ ;
-	for (i = 0; i < out->size; i++)
+	lenbuf = tscount * 2 /* '' */ + tscount - 1 /* space */ + 2 /* \0 */ ;
+	for (i = 0; i < tscount; i++)
 	{
 		lenbuf += ptr[i].len * 2 * pg_database_encoding_max_length() /* for escape */ ;
-		if (ptr[i].haspos)
-			lenbuf += 1 /* : */ + 7 /* int2 + , + weight */ * POSDATALEN(out, &(ptr[i]));
+		if (ptr[i].npos)
+			lenbuf += 1 /* : */ + 7 /* int2 + , + weight */ * ptr[i].npos;
 	}
 
 	curout = outbuf = (char *) palloc(lenbuf);
-	for (i = 0; i < out->size; i++)
+	for (i = 0; i < tscount; i++)
 	{
-		curbegin = curin = STRPTR(out) + ptr->pos;
+		curbegin = curin = STRPTR(out) + pos;
 		if (i != 0)
 			*curout++ = ' ';
 		*curout++ = '\'';
@@ -348,12 +334,12 @@ tsvectorout(PG_FUNCTION_ARGS)
 		}
 
 		*curout++ = '\'';
-		if ((pp = POSDATALEN(out, ptr)) != 0)
+		if ((pp = ptr->npos) != 0)
 		{
 			WordEntryPos *wptr;
 
 			*curout++ = ':';
-			wptr = POSDATAPTR(out, ptr);
+			wptr = POSDATAPTR(curbegin, ptr->len);
 			while (pp)
 			{
 				curout += sprintf(curout, "%d", WEP_GETPOS(*wptr));
@@ -379,7 +365,7 @@ tsvectorout(PG_FUNCTION_ARGS)
 				wptr++;
 			}
 		}
-		ptr++;
+		INCRPTR(ptr, pos);
 	}
 
 	*curout = '\0';
@@ -405,36 +391,37 @@ tsvectorsend(PG_FUNCTION_ARGS)
 	TSVector	vec = PG_GETARG_TSVECTOR(0);
 	StringInfoData buf;
 	int			i,
-				j;
+				j,
+				pos = 0;
 	WordEntry  *weptr = ARRPTR(vec);
 
 	pq_begintypsend(&buf);
 
-	pq_sendint(&buf, vec->size, sizeof(int32));
-	for (i = 0; i < vec->size; i++)
+	pq_sendint(&buf, TS_COUNT(vec), sizeof(int32));
+	for (i = 0; i < TS_COUNT(vec); i++)
 	{
-		uint16		npos;
+		char *lexeme = STRPTR(vec) + pos;
 
 		/*
 		 * the strings in the TSVector array are not null-terminated, so we
 		 * have to send the null-terminator separately
 		 */
-		pq_sendtext(&buf, STRPTR(vec) + weptr->pos, weptr->len);
+		pq_sendtext(&buf, lexeme, weptr->len);
 		pq_sendbyte(&buf, '\0');
 
-		npos = POSDATALEN(vec, weptr);
-		pq_sendint(&buf, npos, sizeof(uint16));
+		pq_sendint(&buf, weptr->npos, sizeof(uint16));
 
-		if (npos > 0)
+		if (weptr->npos > 0)
 		{
-			WordEntryPos *wepptr = POSDATAPTR(vec, weptr);
+			WordEntryPos *wepptr = POSDATAPTR(lexeme, weptr->len);
 
-			for (j = 0; j < npos; j++)
+			for (j = 0; j < weptr->npos; j++)
 				pq_sendint(&buf, wepptr[j], sizeof(WordEntryPos));
 		}
-		weptr++;
+		INCRPTR(weptr, pos);
 	}
 
+	PG_FREE_IF_COPY(vec, 0);
 	PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
@@ -460,12 +447,13 @@ tsvectorrecv(PG_FUNCTION_ARGS)
 
 	len = hdrlen * 2;			/* times two to make room for lexemes */
 	vec = (TSVector) palloc0(len);
-	vec->size = nentries;
+	TS_SETCOUNT(vec, nentries);
 
 	datalen = 0;
 	for (i = 0; i < nentries; i++)
 	{
 		const char *lexeme;
+		char *lexeme_out;
 		uint16		npos;
 		size_t		lex_len;
 
@@ -477,9 +465,6 @@ tsvectorrecv(PG_FUNCTION_ARGS)
 		lex_len = strlen(lexeme);
 		if (lex_len > MAXSTRLEN)
 			elog(ERROR, "invalid tsvector: lexeme too long");
-
-		if (datalen > MAXSTRPOS)
-			elog(ERROR, "invalid tsvector: maximum total lexeme length exceeded");
 
 		if (npos > MAXNUMPOS)
 			elog(ERROR, "unexpected number of tsvector positions");
@@ -496,11 +481,11 @@ tsvectorrecv(PG_FUNCTION_ARGS)
 			vec = (TSVector) repalloc(vec, len);
 		}
 
-		vec->entries[i].haspos = (npos > 0) ? 1 : 0;
+		vec->entries[i].npos = npos;
 		vec->entries[i].len = lex_len;
-		vec->entries[i].pos = datalen;
 
-		memcpy(STRPTR(vec) + datalen, lexeme, lex_len);
+		lexeme_out = STRPTR(vec) + datalen;
+		memcpy(lexeme_out, lexeme, lex_len);
 
 		datalen += lex_len;
 
@@ -526,9 +511,7 @@ tsvectorrecv(PG_FUNCTION_ARGS)
 				datalen = SHORTALIGN(datalen);
 			}
 
-			memcpy(STRPTR(vec) + datalen, &npos, sizeof(uint16));
-
-			wepptr = POSDATAPTR(vec, &vec->entries[i]);
+			wepptr = POSDATAPTR(lexeme_out, lex_len);
 			for (j = 0; j < npos; j++)
 			{
 				wepptr[j] = (WordEntryPos) pq_getmsgint(buf, sizeof(WordEntryPos));
@@ -536,14 +519,14 @@ tsvectorrecv(PG_FUNCTION_ARGS)
 					elog(ERROR, "position information is misordered");
 			}
 
-			datalen += (npos + 1) * sizeof(WordEntry);
+			datalen += npos * sizeof(WordEntry);
 		}
 	}
 
 	SET_VARSIZE(vec, hdrlen + datalen);
 
 	if (needSort)
-		qsort_arg((void *) ARRPTR(vec), vec->size, sizeof(WordEntry),
+		qsort_arg((void *) ARRPTR(vec), TS_COUNT(vec), sizeof(WordEntry),
 				  compareentry, (void *) STRPTR(vec));
 
 	PG_RETURN_TSVECTOR(vec);

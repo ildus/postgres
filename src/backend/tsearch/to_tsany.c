@@ -169,7 +169,7 @@ make_tsvector(ParsedText *prs)
 		if (prs->words[i].alen)
 		{
 			lenstr = SHORTALIGN(lenstr);
-			lenstr += sizeof(uint16) + prs->words[i].pos.apos[0] * sizeof(WordEntryPos);
+			lenstr += prs->words[i].pos.apos[0] * sizeof(WordEntryPos);
 		}
 	}
 
@@ -181,16 +181,20 @@ make_tsvector(ParsedText *prs)
 	totallen = CALCDATASIZE(prs->curwords, lenstr);
 	in = (TSVector) palloc0(totallen);
 	SET_VARSIZE(in, totallen);
-	in->size = prs->curwords;
+	TS_SETCOUNT(in, prs->curwords);
 
 	ptr = ARRPTR(in);
 	str = STRPTR(in);
 	stroff = 0;
 	for (i = 0; i < prs->curwords; i++)
 	{
+		char *strloc;
+
 		ptr->len = prs->words[i].len;
-		ptr->pos = stroff;
-		memcpy(str + stroff, prs->words[i].word, prs->words[i].len);
+		ptr->npos = 0;
+
+		strloc = str + stroff;
+		memcpy(strloc, prs->words[i].word, prs->words[i].len);
 		stroff += prs->words[i].len;
 		pfree(prs->words[i].word);
 		if (prs->words[i].alen)
@@ -201,20 +205,18 @@ make_tsvector(ParsedText *prs)
 			if (k > 0xFFFF)
 				elog(ERROR, "positions array too long");
 
-			ptr->haspos = 1;
 			stroff = SHORTALIGN(stroff);
-			*(uint16 *) (str + stroff) = (uint16) k;
-			wptr = POSDATAPTR(in, ptr);
+			ptr->npos = (uint16) k;
+			wptr = POSDATAPTR(strloc, prs->words[i].len);
 			for (j = 0; j < k; j++)
 			{
 				WEP_SETWEIGHT(wptr[j], 0);
 				WEP_SETPOS(wptr[j], prs->words[i].pos.apos[j + 1]);
 			}
-			stroff += sizeof(uint16) + k * sizeof(WordEntryPos);
+			stroff += k * sizeof(WordEntryPos);
 			pfree(prs->words[i].pos.apos);
 		}
-		else
-			ptr->haspos = 0;
+
 		ptr++;
 	}
 	pfree(prs->words);
@@ -247,7 +249,7 @@ to_tsvector_byid(PG_FUNCTION_ARGS)
 		pfree(prs.words);
 		out = palloc(CALCDATASIZE(0, 0));
 		SET_VARSIZE(out, CALCDATASIZE(0, 0));
-		out->size = 0;
+		TS_SETCOUNT(out, 0);
 	}
 
 	PG_RETURN_POINTER(out);
@@ -294,7 +296,7 @@ jsonb_to_tsvector_byid(PG_FUNCTION_ARGS)
 
 		state.result = palloc(CALCDATASIZE(0, 0));
 		SET_VARSIZE(state.result, CALCDATASIZE(0, 0));
-		state.result->size = 0;
+		TS_SETCOUNT(state.result, 0);
 	}
 
 	PG_RETURN_TSVECTOR(state.result);
@@ -340,7 +342,7 @@ json_to_tsvector_byid(PG_FUNCTION_ARGS)
 
 		state.result = palloc(CALCDATASIZE(0, 0));
 		SET_VARSIZE(state.result, CALCDATASIZE(0, 0));
-		state.result->size = 0;
+		TS_SETCOUNT(state.result, 0);
 	}
 
 	PG_RETURN_TSVECTOR(state.result);
