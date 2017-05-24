@@ -141,7 +141,7 @@ typedef ExpandedTSVectorHeader *TSVectorExpanded;
  * pointer to start of positions, requires lexeme pointer
  * and length of lexeme
  */
-#define POSDATAPTR(lex,len) ((WordEntryPos *)((lex) + SHORTALIGN(len)))
+#define POSDATAPTR(lex,len) ((WordEntryPos *)(SHORTALIGN(lex + len)))
 
 /* increments WordEntry pointer and moves pos to next lexeme position */
 #define INCRPTR(e,pos) \
