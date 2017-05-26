@@ -78,10 +78,11 @@ expand_tsvector(Datum vectorDatum, MemoryContext parentcontext)
 	evh->ev_magic = EV_MAGIC;
 	evh->datum = vectorDatum;
 	evh->count = TS_COUNT(vector);
-	evh->positions = (uint32 *)palloc0(sizeof(uint32) * evh->count);
+	evh->maxidx = 0;
+	evh->positions = (uint32 *)palloc(sizeof(uint32) * evh->count);
+	evh->positions[0] = 0;
 	evh->entries = (WordEntry *) VARDATA(PG_DETOAST_DATUM_SLICE(vectorDatum,
 		sizeof(int32), sizeof(WordEntry) * evh->count));
-	evh->maxidx = 0;
 
 	MemoryContextSwitchTo(oldcxt);
 	pfree(vector);
