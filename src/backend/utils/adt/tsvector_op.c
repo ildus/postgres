@@ -277,17 +277,15 @@ Datum
 tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 {
 	TSVector			tsout = PG_GETARG_TSVECTOR_COPY(0);
+	TSVectorExpanded	vec = PG_GETARG_EXPANDED_TSVECTOR(0);
 	char				char_weight = PG_GETARG_CHAR(1);
 	ArrayType		   *lexemes = PG_GETARG_ARRAYTYPE_P(2);
 
-	TSVectorExpanded	vec = DatumGetExpandedTSVector((Datum) tsout);
 	int					i,
-						j,
 						nlexemes,
 						weight;
 	Datum			   *dlexemes;
 	bool			   *nulls;
-	WordEntry		   *entry;
 
 	switch (char_weight)
 	{
@@ -312,7 +310,6 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 			elog(ERROR, "unrecognized weight: %c", char_weight);
 	}
 
-	entry = ARRPTR(tsout);
 	deconstruct_array(lexemes, TEXTOID, -1, false, 'i',
 					  &dlexemes, &nulls, &nlexemes);
 
@@ -326,6 +323,7 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 		char	   *lex;
 		int			lex_len,
 					lex_pos;
+		WordEntry  *entry;
 
 		if (nulls[i])
 			ereport(ERROR,
@@ -335,20 +333,20 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 		lex = VARDATA(dlexemes[i]);
 		lex_len = VARSIZE(dlexemes[i]) - VARHDRSZ;
 		lex_pos = tsvector_bsearch(vec, lex, lex_len);
+		entry = ARRPTR(tsout) + lex_pos;
 
-		if (lex_pos >= 0 && ((entry + lex_pos)->npos > 0))
+		if (lex_pos >= 0 && entry->npos > 0)
 		{
-			int pos = tsvector_getposition(vec, lex_pos);
-			WordEntryPos *p = POSDATAPTR(STRPTR(tsout) + pos, (entry + lex_pos)->len);
+			int				j;
+			int				pos = tsvector_getposition(vec, lex_pos);
+			WordEntryPos   *p = POSDATAPTR(STRPTR(tsout) + pos, entry->len);
 
-			while (j--)
-			{
-				WEP_SETWEIGHT(*p, weight);
-				p++;
-			}
+			for (j = 0; j < entry->npos; j++)
+				WEP_SETWEIGHT(p[j], weight);
 		}
 	}
 
+	/* TODO: free expanded object */
 	PG_FREE_IF_COPY(lexemes, 2);
 	PG_RETURN_POINTER(tsout);
 }
@@ -566,7 +564,7 @@ tsvector_delete_str(PG_FUNCTION_ARGS)
 						skip_index;
 
 	if ((skip_index = tsvector_bsearch(tsin, lexeme, lexeme_len)) == -1)
-		PG_RETURN_POINTER(tsin);
+		PG_RETURN_POINTER(tsin->datum);
 
 	tsout = tsvector_delete_by_indices(tsin, &skip_index, 1);
 
@@ -622,7 +620,7 @@ tsvector_delete_arr(PG_FUNCTION_ARGS)
 	tsout = tsvector_delete_by_indices(tsin, skip_indices, skip_count);
 
 	pfree(skip_indices);
-	PG_FREE_IF_COPY(tsin, 0);
+	/* TODO: free tsin right way */
 	PG_FREE_IF_COPY(lexemes, 1);
 
 	PG_RETURN_POINTER(tsout);
@@ -658,7 +656,7 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 						   TEXTARRAYOID, -1, 0);
 		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-		funcctx->user_fctx = list_make2(PG_GETARG_EXPANDED_TSVECTOR(0), makeInteger(0));
+		funcctx->user_fctx = list_make2(PG_GETARG_TSVECTOR(0), makeInteger(0));
 
 		MemoryContextSwitchTo(oldcontext);
 	}
@@ -891,16 +889,17 @@ tsvector_filter(PG_FUNCTION_ARGS)
 	entryout = ARRPTR(tsout);
 	dataout = STRPTR(tsout);
 	len = TS_COUNT(tsin);
+	copied = 0;
 
 	while (len--)
 	{
 		WordEntryPos   *posvin,
 					   *posvout;
-		int				npos = 0;
-		int				k;
+		int				npos = 0,
+						k;
 
 		if (!entryin->npos)
-			continue;
+			goto next;
 
 		posvin = POSDATAPTR(datain + posin, entryin->len);
 		posvout = POSDATAPTR(dataout + posout, entryin->len);
@@ -908,13 +907,12 @@ tsvector_filter(PG_FUNCTION_ARGS)
 		for (k = 0; k < entryin->npos; k++)
 		{
 			if (mask & (1 << WEP_GETWEIGHT(posvin[k])))
-				posvout[npos] = posvin[k];
-			npos++;
+				posvout[npos++] = posvin[k];
 		}
 
 		/* if no satisfactory positions found, skip lexeme */
 		if (!npos)
-			continue;
+			goto next;
 
 		entryout->npos = npos;
 		entryout->len = entryin->len;
@@ -923,8 +921,9 @@ tsvector_filter(PG_FUNCTION_ARGS)
 		/* copy text */
 		memcpy(dataout + posout, datain + posin, entryin->len);
 
-		INCRPTR(entryin, posin);
 		INCRPTR(entryout, posout);
+next:
+		INCRPTR(entryin, posin);
 	}
 
 	TS_SETCOUNT(tsout, copied);
@@ -1334,7 +1333,7 @@ checkcondition_str(void *checkval, QueryOperand *val, ExecPhraseData *data)
 		{
 			/* Check weight info & fill 'data' with positions */
 			res = checkclass_str(POSDATAPTR(lexeme, entry->len),
-								 StopMiddle, val, data);
+								 entry->npos, val, data);
 			break;
 		}
 		else if (difference > 0)
@@ -1345,8 +1344,7 @@ checkcondition_str(void *checkval, QueryOperand *val, ExecPhraseData *data)
 
 	if ((!res || data) && val->prefix)
 	{
-		WordEntryPos *allpos = NULL,
-					 *pv;
+		WordEntryPos *allpos = NULL;
 		int			npos = 0,
 					totalpos = 0;
 
@@ -1357,16 +1355,23 @@ checkcondition_str(void *checkval, QueryOperand *val, ExecPhraseData *data)
 		if (StopLow >= StopHigh)
 			StopMiddle = StopHigh;
 
-		lexeme = tsvector_getlexeme(chkval->vec, StopMiddle, &entry);
-		pv = POSDATAPTR(lexeme, entry->len);
-
-		while ((!res || data) && StopMiddle < chkval->eidx &&
-			   tsCompareString(chkval->operand + val->distance,
-							   val->length,
-							   lexeme,
-							   entry->len,
-							   true) == 0)
+		while ((!res || data) && StopMiddle < chkval->eidx)
 		{
+			char		   *lexeme;
+			int				cmp;
+			WordEntryPos   *pv;
+
+			lexeme = tsvector_getlexeme(chkval->vec, StopMiddle, &entry);
+			pv = POSDATAPTR(lexeme, entry->len);
+			cmp = tsCompareString(chkval->operand + val->distance,
+								  val->length,
+								  lexeme,
+								  entry->len,
+								  true);
+
+			if (cmp != 0)
+				break;
+
 			if (data)
 			{
 				/*
@@ -1396,7 +1401,7 @@ checkcondition_str(void *checkval, QueryOperand *val, ExecPhraseData *data)
 			}
 			else
 			{
-				res = checkclass_str(pv, StopMiddle, val, NULL);
+				res = checkclass_str(pv, entry->npos, val, NULL);
 			}
 
 			StopMiddle++;
@@ -1935,10 +1940,10 @@ ts_match_vq(PG_FUNCTION_ARGS)
 	CHKVAL				chkval;
 	bool				result;
 
-	/* empty query matches nothing */
-	if (!query->size)
+	/* empty query or tsvector matches nothing */
+	if (!val->count || !query->size)
 	{
-		PG_FREE_IF_COPY(val, 0);
+		/* TODO: free expanded right way */
 		PG_FREE_IF_COPY(query, 1);
 		PG_RETURN_BOOL(false);
 	}
@@ -1952,7 +1957,7 @@ ts_match_vq(PG_FUNCTION_ARGS)
 						TS_EXEC_CALC_NOT,
 						checkcondition_str);
 
-	PG_FREE_IF_COPY(val, 0);
+	/* TODO: free expanded right way */
 	PG_FREE_IF_COPY(query, 1);
 	PG_RETURN_BOOL(result);
 }

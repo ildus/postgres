@@ -99,7 +99,12 @@ tsvector_getlexeme(TSVectorExpanded vec, int idx, WordEntry **we)
 	int32			pos,
 					pos2;
 
-	Assert(idx < vec->count);
+	Assert(idx >=0 && idx < vec->count);
+
+	/*
+	 * we do not allow we == NULL because returned lexeme is not \0 ended,
+	 * and always should be used with we->len
+	 */
 	Assert(we != NULL);
 	*we = &vec->entries[idx];
 
