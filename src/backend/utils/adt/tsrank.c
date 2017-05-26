@@ -768,7 +768,7 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 		while (idx - firstidx < nitem)
 		{
 			WordEntry	*entry;
-			char		*lex = tsvector_getlexeme(txt, idx, &entry);
+			char		*lex = tsvector_getlexeme(txt, idx++, &entry);
 
 			if (entry->npos)
 			{
@@ -778,7 +778,6 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 			else
 			{
 				/* ignore words without positions */
-				idx++;
 				continue;
 			}
 
@@ -800,8 +799,6 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 					cur++;
 				}
 			}
-
-			idx++;
 		}
 	}
 
