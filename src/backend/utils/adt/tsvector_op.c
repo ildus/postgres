@@ -1377,7 +1377,7 @@ checkcondition_str(void *checkval, QueryOperand *val, ExecPhraseData *data)
 				/*
 				 * We need to join position information
 				 */
-				res = checkclass_str(pv, StopMiddle, val, data);
+				res = checkclass_str(pv, entry->npos, val, data);
 
 				if (res)
 				{
@@ -1940,8 +1940,8 @@ ts_match_vq(PG_FUNCTION_ARGS)
 	CHKVAL				chkval;
 	bool				result;
 
-	/* empty query or tsvector matches nothing */
-	if (!val->count || !query->size)
+	/* empty query matches nothing */
+	if (!query->size)
 	{
 		/* TODO: free expanded right way */
 		PG_FREE_IF_COPY(query, 1);
