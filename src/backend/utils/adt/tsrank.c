@@ -512,13 +512,13 @@ typedef struct
 		struct
 		{						/* compiled doc representation */
 			QueryItem **items;
-			int16		nitem;
+			int32		nitem;
 		}			query;
 		struct
 		{						/* struct is used for preparing doc
 								 * representation */
 			QueryItem  *item;
-			WordEntry  *entry;
+			int32		idx;
 		}			map;
 	}			data;
 	WordEntryPos pos;
@@ -534,10 +534,10 @@ compareDocR(const void *va, const void *vb)
 	{
 		if (WEP_GETWEIGHT(a->pos) == WEP_GETWEIGHT(b->pos))
 		{
-			if (a->data.map.entry == b->data.map.entry)
+			if (a->data.map.idx == b->data.map.idx)
 				return 0;
 
-			return (a->data.map.entry > b->data.map.entry) ? 1 : -1;
+			return (a->data.map.idx > b->data.map.idx) ? 1 : -1;
 		}
 
 		return (WEP_GETWEIGHT(a->pos) > WEP_GETWEIGHT(b->pos)) ? 1 : -1;
@@ -768,7 +768,7 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 		while (idx - firstidx < nitem)
 		{
 			WordEntry	*entry;
-			char		*lex = tsvector_getlexeme(txt, idx++, &entry);
+			char		*lex = tsvector_getlexeme(txt, idx, &entry);
 
 			if (entry->npos)
 			{
@@ -778,6 +778,7 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 			else
 			{
 				/* ignore words without positions */
+				idx++;
 				continue;
 			}
 
@@ -794,11 +795,12 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 					curoperand->weight & (1 << WEP_GETWEIGHT(post[j])))
 				{
 					doc[cur].pos = post[j];
-					doc[cur].data.map.entry = entry;
+					doc[cur].data.map.idx = idx;
 					doc[cur].data.map.item = (QueryItem *) curoperand;
 					cur++;
 				}
 			}
+			idx++;
 		}
 	}
 
@@ -824,7 +826,7 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 		while (rptr - doc < cur)
 		{
 			if (rptr->pos == (rptr - 1)->pos &&
-				rptr->data.map.entry == (rptr - 1)->data.map.entry)
+				rptr->data.map.idx == (rptr - 1)->data.map.idx)
 			{
 				storage.data.query.items[storage.data.query.nitem] = rptr->data.map.item;
 				storage.data.query.nitem++;
@@ -950,7 +952,6 @@ calc_rank_cd(const float4 *arrdata, TSVectorExpanded txt, TSQuery query, int met
 		Wdoc /= (Wdoc + 1);
 
 	pfree(doc);
-
 	pfree(qr.operandData);
 
 	return (float4) Wdoc;
