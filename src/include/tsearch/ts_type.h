@@ -44,7 +44,8 @@ typedef struct
 	uint32
 		len:11,
 		npos:16,
-		_unused:5;
+		aligned:1,
+		_unused:4;
 } WordEntry;
 
 #define MAXSTRLEN ( (1<<11) - 1)
@@ -141,7 +142,7 @@ typedef ExpandedTSVectorHeader *TSVectorExpanded;
  * pointer to start of positions, requires lexeme pointer
  * and length of lexeme
  */
-#define POSDATAPTR(lex,len) ((WordEntryPos *)(SHORTALIGN(lex + len)))
+#define POSDATAPTR(lex,len) ((WordEntryPos *)((lex) + SHORTALIGN(len)))
 
 /* increments WordEntry pointer and moves pos to next lexeme position */
 #define INCRPTR(e,pos) \

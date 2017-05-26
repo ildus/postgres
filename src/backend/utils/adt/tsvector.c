@@ -273,7 +273,7 @@ tsvectorin(PG_FUNCTION_ARGS)
 			if (arr[i].entry.npos > 0xFFFF)
 				elog(ERROR, "positions array too long");
 
-			/* Copy number of positions */
+			arr[i].entry.aligned = (stroff == SHORTALIGN(stroff));
 			stroff = SHORTALIGN(stroff);
 
 			/* Copy positions */
