@@ -142,7 +142,7 @@ tsvector_getposition(TSVectorExpanded vec, int idx)
 
 		for (i = vec->maxidx + 1; i <= idx; i++)
 		{
-			INCRPTR(entry, pos);
+			IncrPtr(entry, pos);
 			vec->positions[i] = pos;
 		}
 		vec->maxidx = idx;

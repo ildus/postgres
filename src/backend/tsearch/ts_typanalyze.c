@@ -275,7 +275,7 @@ compute_tsvector_stats(VacAttrStats *stats,
 			}
 
 			/* Advance to the next WordEntry in the tsvector */
-			INCRPTR(curentryptr, pos);
+			IncrPtr(curentryptr, pos);
 		}
 	}
 

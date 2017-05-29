@@ -145,9 +145,15 @@ typedef ExpandedTSVectorHeader *TSVectorExpanded;
 #define POSDATAPTR(lex,len) ((WordEntryPos *)((lex) + SHORTALIGN(len)))
 
 /* increments WordEntry pointer and moves pos to next lexeme position */
-#define INCRPTR(e,pos) \
-	(pos = ((e)->npos == 0) ? (pos) + (e)->len : \
-		SHORTALIGN((pos) + (e)->len) + (e)->npos * sizeof(WordEntryPos), (e)++)
+#define IncrPtr(we, pos) \
+do { \
+	if ((we)->npos == 0) \
+		(pos) += (we)->len; \
+	else \
+		(pos) = SHORTALIGN((pos) + (we)->len) + (we)->npos * sizeof(WordEntryPos); \
+	(we)++; \
+	(pos) = SHORTALIGN(pos); \
+} while (0);
 
 /*
  * fmgr interface macros

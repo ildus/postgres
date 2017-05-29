@@ -212,7 +212,7 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 			*arr = *(int32 *) &c;
 			arr++;
 
-			INCRPTR(ptr, pos);
+			IncrPtr(ptr, pos);
 		}
 
 		len = uniqueint(GETARR(res), tscount);
