@@ -44,8 +44,7 @@ typedef struct
 	uint32
 		len:11,
 		npos:16,
-		aligned:1,
-		_unused:4;
+		_unused:5;
 } WordEntry;
 
 #define MAXSTRLEN ( (1<<11) - 1)

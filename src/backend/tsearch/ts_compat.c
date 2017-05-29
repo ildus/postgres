@@ -57,6 +57,7 @@ tsvector_upgrade(Datum orig)
 		newentry->_unused = 0;
 
 		/* Move lexeme */
+		offset = SHORTALIGN(offset);
 		memmove(STRPTR(vec) + offset, STRPTR(vec) + entry.pos, entry.len);
 		offset += entry.len;
 
