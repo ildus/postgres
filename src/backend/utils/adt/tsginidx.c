@@ -85,7 +85,7 @@ gin_extract_tsvector(PG_FUNCTION_ARGS)
 			txt = cstring_to_text_with_len(STRPTR(vector) + pos, we->len);
 			entries[i] = PointerGetDatum(txt);
 
-			INCRPTR(we, pos);
+			IncrPtr(we, pos);
 		}
 	}
 

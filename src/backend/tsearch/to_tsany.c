@@ -193,6 +193,7 @@ make_tsvector(ParsedText *prs)
 		ptr->len = prs->words[i].len;
 		ptr->npos = 0;
 
+		stroff = SHORTALIGN(stroff);
 		strloc = str + stroff;
 		memcpy(strloc, prs->words[i].word, prs->words[i].len);
 		stroff += prs->words[i].len;

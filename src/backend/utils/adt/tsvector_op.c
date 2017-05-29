@@ -133,8 +133,8 @@ silly_cmp_tsvector(const TSVector a, const TSVector b)
 				}
 			}
 
-			INCRPTR(aptr, pos1);
-			INCRPTR(bptr, pos2);
+			IncrPtr(aptr, pos1);
+			IncrPtr(bptr, pos2);
 		}
 	}
 
@@ -179,7 +179,7 @@ tsvector_strip(PG_FUNCTION_ARGS)
 
 	count = TS_COUNT(in);
 	for (i = 0; i < count; i++)
-		len += (ARRPTR(in) + i)->len;
+		len += SHORTALIGN((ARRPTR(in) + i)->len);
 
 	len = CALCDATASIZE(count, len);
 	out = (TSVector) palloc0(len);
@@ -197,8 +197,8 @@ tsvector_strip(PG_FUNCTION_ARGS)
 		entryout->npos = 0;
 		entryout->len = entryin->len;
 
-		INCRPTR(entryin, pos);
-		INCRPTR(entryout, posout);
+		IncrPtr(entryin, pos);
+		IncrPtr(entryout, posout);
 	}
 
 	PG_FREE_IF_COPY(in, 0);
@@ -261,7 +261,7 @@ tsvector_setweight(PG_FUNCTION_ARGS)
 			for (j = 0; j < entry->npos; j++)
 				WEP_SETWEIGHT(p[j], w);
 		}
-		INCRPTR(entry, pos);
+		IncrPtr(entry, pos);
 	}
 
 	PG_FREE_IF_COPY(in, 0);
@@ -533,9 +533,9 @@ tsvector_delete_by_indices(TSVectorExpanded vec, int *indices_to_delete,
 				   len);
 		}
 
-		INCRPTR(entryout, posout);
+		IncrPtr(entryout, posout);
 next:
-		INCRPTR(entryin, posin);
+		IncrPtr(entryin, posin);
 	}
 
 	/*
@@ -711,7 +711,7 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 			nulls[1] = nulls[2] = true;
 		}
 
-		INCRPTR(entry, intVal(lsecond(funcctx->user_fctx)));
+		IncrPtr(entry, intVal(lsecond(funcctx->user_fctx)));
 		tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 		SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
 	}
@@ -743,7 +743,7 @@ tsvector_to_array(PG_FUNCTION_ARGS)
 		elements[i++] = PointerGetDatum(
 		  cstring_to_text_with_len(STRPTR(tsin) + pos, entry->len)
 			);
-		INCRPTR(entry, pos);
+		IncrPtr(entry, pos);
 	}
 
 	array = construct_array(elements, TS_COUNT(tsin), TEXTOID, -1, false, 'i');
@@ -797,7 +797,7 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 
 	/* Calculate space needed for surviving lexemes. */
 	for (i = 0; i < nitems; i++)
-		datalen += VARSIZE(dlexemes[i]) - VARHDRSZ;
+		datalen += SHORTALIGN(VARSIZE(dlexemes[i]) - VARHDRSZ);
 	tslen = CALCDATASIZE(nitems, datalen);
 
 	/* Allocate and fill tsvector. */
@@ -815,7 +815,7 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 		memcpy(cur, lex, lex_len);
 		arrout[i].npos = 0;
 		arrout[i].len = lex_len;
-		cur += lex_len;
+		cur += SHORTALIGN(lex_len);
 	}
 
 	PG_FREE_IF_COPY(v, 0);
@@ -921,9 +921,9 @@ tsvector_filter(PG_FUNCTION_ARGS)
 		/* copy text */
 		memcpy(dataout + posout, datain + posin, entryin->len);
 
-		INCRPTR(entryout, posout);
+		IncrPtr(entryout, posout);
 next:
-		INCRPTR(entryin, posin);
+		IncrPtr(entryin, posin);
 	}
 
 	TS_SETCOUNT(tsout, copied);
@@ -974,7 +974,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 				p++;
 			}
 		}
-		INCRPTR(ptr, pos1);
+		IncrPtr(ptr, pos1);
 	}
 
 	ptr1 = ARRPTR(in1);
@@ -1025,7 +1025,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 			}
 
 			ptr++;
-			INCRPTR(ptr1, pos1);
+			IncrPtr(ptr1, pos1);
 			i1--;
 		}
 		else if (cmp > 0)
@@ -1047,7 +1047,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 			}
 
 			ptr++;
-			INCRPTR(ptr2, pos2);
+			IncrPtr(ptr2, pos2);
 			i2--;
 		}
 		else
@@ -1085,8 +1085,8 @@ tsvector_concat(PG_FUNCTION_ARGS)
 			}
 
 			ptr++;
-			INCRPTR(ptr1, pos1);
-			INCRPTR(ptr2, pos2);
+			IncrPtr(ptr1, pos1);
+			IncrPtr(ptr2, pos2);
 			i1--;
 			i2--;
 		}
@@ -1107,7 +1107,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 		}
 
 		ptr++;
-		INCRPTR(ptr1, pos1);
+		IncrPtr(ptr1, pos1);
 	}
 
 	while (i2--)
@@ -1129,7 +1129,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 		}
 
 		ptr++;
-		INCRPTR(ptr2, pos2);
+		IncrPtr(ptr2, pos2);
 	}
 
 	/*

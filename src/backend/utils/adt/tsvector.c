@@ -116,6 +116,7 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 			  strncmp(&buf[ptr->offset], &buf[res->offset], res->entry.len) == 0))
 		{
 			/* done accumulating data into *res, count space needed */
+			buflen = SHORTALIGN(buflen);
 			buflen += res->entry.len;
 			if (res->entry.npos)
 			{
@@ -125,7 +126,7 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 			}
 			res++;
 			if (res != ptr)
-				memcpy(res, ptr, sizeof(WordEntryIN));
+				*res = *ptr;
 		}
 		else if (ptr->entry.npos)
 		{
@@ -152,6 +153,7 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 	}
 
 	/* count space needed for last item */
+	buflen = SHORTALIGN(buflen);
 	buflen += res->entry.len;
 	if (res->entry.npos)
 	{
@@ -266,6 +268,7 @@ tsvectorin(PG_FUNCTION_ARGS)
 	stroff = 0;
 	for (i = 0; i < len; i++)
 	{
+		stroff = SHORTALIGN(stroff);
 		memcpy(strbuf + stroff, &tmpbuf[arr[i].offset], arr[i].entry.len);
 		stroff += arr[i].entry.len;
 		if (arr[i].entry.npos)
@@ -365,7 +368,7 @@ tsvectorout(PG_FUNCTION_ARGS)
 				wptr++;
 			}
 		}
-		INCRPTR(ptr, pos);
+		IncrPtr(ptr, pos);
 	}
 
 	*curout = '\0';
@@ -418,7 +421,7 @@ tsvectorsend(PG_FUNCTION_ARGS)
 			for (j = 0; j < weptr->npos; j++)
 				pq_sendint(&buf, wepptr[j], sizeof(WordEntryPos));
 		}
-		INCRPTR(weptr, pos);
+		IncrPtr(weptr, pos);
 	}
 
 	PG_FREE_IF_COPY(vec, 0);
