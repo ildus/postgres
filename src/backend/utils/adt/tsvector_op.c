@@ -1014,6 +1014,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 		{						/* in1 first */
 			ptr->npos = ptr1->npos;
 			ptr->len = ptr1->len;
+			dataoff = SHORTALIGN(dataoff);
 			memcpy(data + dataoff, data1 + pos1, ptr1->len);
 			dataoff += ptr1->len;
 			if (ptr->npos)
@@ -1032,6 +1033,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 		{						/* in2 first */
 			ptr->npos = 0;
 			ptr->len = ptr2->len;
+			dataoff = SHORTALIGN(dataoff);
 			memcpy(data + dataoff, data2 + pos2, ptr2->len);
 			dataoff += ptr2->len;
 			if (ptr2->npos)
@@ -1054,6 +1056,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 		{
 			ptr->len = ptr1->len;
 			ptr->npos = 0;
+			dataoff = SHORTALIGN(dataoff);
 			memcpy(data + dataoff, data1 + pos1, ptr1->len);
 			dataoff += ptr1->len;
 			if (ptr1->npos || ptr2->npos)
@@ -1096,6 +1099,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 	{
 		ptr->npos = ptr1->npos;
 		ptr->len = ptr1->len;
+		dataoff = SHORTALIGN(dataoff);
 		memcpy(data + dataoff, data1 + pos1, ptr1->len);
 		dataoff += ptr1->len;
 		if (ptr->npos)
@@ -1114,6 +1118,7 @@ tsvector_concat(PG_FUNCTION_ARGS)
 	{
 		ptr->npos = 0;
 		ptr->len = ptr2->len;
+		dataoff = SHORTALIGN(dataoff);
 		memcpy(data + dataoff, data2 + pos2, ptr2->len);
 		dataoff += ptr2->len;
 		if (ptr2->npos)
