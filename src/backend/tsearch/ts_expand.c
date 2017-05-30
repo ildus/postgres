@@ -13,6 +13,7 @@
  */
 
 #include "postgres.h"
+#include "access/tuptoaster.h"
 #include "tsearch/ts_utils.h"
 
 #define EV_MAGIC 0xF4F4F4F4
@@ -42,7 +43,6 @@ EV_get_flat_size(ExpandedObjectHeader *eohptr)
 	return VARSIZE(evhptr->datum);
 }
 
-
 /*
  * expand_tsvector - converts tsvector datum to an expanded
  * tsvector
@@ -50,13 +50,28 @@ EV_get_flat_size(ExpandedObjectHeader *eohptr)
 static Datum
 expand_tsvector(Datum vectorDatum, MemoryContext parentcontext)
 {
-	MemoryContext objcxt, oldcxt;
+	MemoryContext			objcxt,
+							oldcxt;
 	ExpandedTSVectorHeader *evh;
-	TSVector vector;
+	TSVector				vector;
+	bool					untoast_full = false;
 
 	/* If already expanded do nothing */
-	if (VARATT_IS_EXTERNAL_EXPANDED(DatumGetPointer(vectorDatum)))
-		return vectorDatum;
+	vector = (TSVector) DatumGetPointer(vectorDatum);
+	if (VARATT_IS_EXTERNAL(vector))
+	{
+		struct varatt_external toast_pointer;
+
+		if (VARATT_IS_EXTERNAL_EXPANDED(vector))
+			return vectorDatum;
+
+		VARATT_EXTERNAL_GET_POINTER(toast_pointer, vector);
+		if ((VARSIZE_EXTERNAL(vector) < BLCKSZ) ||
+			(VARATT_EXTERNAL_IS_COMPRESSED(toast_pointer)))
+				untoast_full = true;
+	}
+	else if (VARATT_IS_COMPRESSED(vector))
+		untoast_full = true;
 
 	/* Allocate private context for expanded object */
 	objcxt = AllocSetContextCreate(parentcontext,
@@ -71,8 +86,11 @@ expand_tsvector(Datum vectorDatum, MemoryContext parentcontext)
 
 	EOH_init_header(&evh->hdr, &EV_methods, objcxt);
 
-	/* Get only size_ value of TSVector */
-	vector = (TSVector) PG_DETOAST_DATUM_SLICE(vectorDatum, 0, sizeof(int32));
+	if (untoast_full)
+		vector = (TSVector) PG_DETOAST_DATUM(vectorDatum);
+	else
+		/* Get only size_ value of TSVector */
+		vector = (TSVector) PG_DETOAST_DATUM_SLICE(vectorDatum, 0, sizeof(int32));
 
 	oldcxt = MemoryContextSwitchTo(objcxt);
 	evh->ev_magic = EV_MAGIC;
@@ -81,11 +99,22 @@ expand_tsvector(Datum vectorDatum, MemoryContext parentcontext)
 	evh->maxidx = 0;
 	evh->positions = (uint32 *)palloc(sizeof(uint32) * evh->count);
 	evh->positions[0] = 0;
-	evh->entries = (WordEntry *) VARDATA(PG_DETOAST_DATUM_SLICE(vectorDatum,
-		sizeof(int32), sizeof(WordEntry) * evh->count));
+
+	if (untoast_full)
+	{
+		evh->cached_data = STRPTR(vector);
+		evh->entries = ARRPTR(vector);
+	}
+	else
+	{
+		evh->cached_data = NULL;
+		evh->entries = (WordEntry *) VARDATA(PG_DETOAST_DATUM_SLICE(vectorDatum,
+			sizeof(int32), sizeof(WordEntry) * evh->count));
+
+		pfree(vector);
+	}
 
 	MemoryContextSwitchTo(oldcxt);
-	pfree(vector);
 
 	/* return a R/O pointer to the expanded tsvector */
 	return EOHPGetRODatum(&evh->hdr);
@@ -119,11 +148,16 @@ tsvector_getlexeme(TSVectorExpanded vec, int idx, WordEntry **we)
 	}
 
 	/* we do all memory allocations in the context of the expanded object */
-	oldcxt = MemoryContextSwitchTo(vec->hdr.eoh_context);
-	lexeme = (char *) VARDATA(PG_DETOAST_DATUM_SLICE(vec->datum,
-		sizeof(int32) + sizeof(WordEntry) * vec->count + pos,
-		pos2 - pos + 1));
-	MemoryContextSwitchTo(oldcxt);
+	if (vec->cached_data)
+		lexeme = vec->cached_data + pos;
+	else
+	{
+		oldcxt = MemoryContextSwitchTo(vec->hdr.eoh_context);
+		lexeme = (char *) VARDATA(PG_DETOAST_DATUM_SLICE(vec->datum,
+			sizeof(int32) + sizeof(WordEntry) * vec->count + pos,
+			pos2 - pos + 1));
+		MemoryContextSwitchTo(oldcxt);
+	}
 
 	return lexeme;
 }
@@ -132,8 +166,9 @@ tsvector_getlexeme(TSVectorExpanded vec, int idx, WordEntry **we)
 int
 tsvector_getposition(TSVectorExpanded vec, int idx)
 {
-	WordEntry *entry;
-	int32 i, pos;
+	WordEntry  *entry;
+	int32		i,
+				pos;
 
 	if (idx > vec->maxidx)
 	{
