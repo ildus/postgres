@@ -115,11 +115,12 @@ typedef struct ExpandedTSVectorHeader
 	/* Magic value identifying an expanded tsvector (for debugging only) */
 	uint32		ev_magic;
 
-	Datum		datum;		/* original datum */
+	Datum		datum;			/* original datum */
 	WordEntry  *entries;
-	uint32		count;		/* lexemes count */
-	uint32	   *positions;	/* entry positions cache, calculated */
-	size_t		maxidx;		/* count of calculated indices */
+	uint32		count;			/* lexemes count */
+	uint32	   *positions;		/* entry positions cache, calculated */
+	size_t		maxidx;			/* count of calculated indices */
+	char*		cached_data;	/* optimization for small tsvectors */
 } ExpandedTSVectorHeader;
 
 typedef ExpandedTSVectorHeader *TSVectorExpanded;
