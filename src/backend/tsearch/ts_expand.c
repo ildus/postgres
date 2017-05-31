@@ -70,8 +70,12 @@ expand_tsvector(Datum vectorDatum, MemoryContext parentcontext)
 			(VARATT_EXTERNAL_IS_COMPRESSED(toast_pointer)))
 				untoast_full = true;
 	}
-	else if (VARATT_IS_COMPRESSED(vector))
-		untoast_full = true;
+	else if (VARATT_IS_EXTENDED(vector))
+	{
+		if (VARATT_IS_COMPRESSED(vector))
+			untoast_full = true;
+	}
+	else untoast_full = true;
 
 	/* Allocate private context for expanded object */
 	objcxt = AllocSetContextCreate(parentcontext,
