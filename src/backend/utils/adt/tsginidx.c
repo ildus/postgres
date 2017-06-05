@@ -72,8 +72,9 @@ gin_extract_tsvector(PG_FUNCTION_ARGS)
 	*nentries = tscount;
 	if (tscount > 0)
 	{
-		int			i,
-					offset = 0;
+		int			i;
+		uint32		offset = 0;
+
 		WordEntry  *we = ARRPTR(vector);
 		entries = (Datum *) palloc(sizeof(Datum) * tscount);
 

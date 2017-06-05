@@ -58,7 +58,7 @@ cnt_length(TSVector t)
 
 	for (i = 0; i < TS_COUNT(t); i++)
 	{
-		WordEntry *entry = UNWRAP_ENTRY(ARRPTR(t) + i);
+		WordEntry *entry = UNWRAP_ENTRY(t, ARRPTR(t) + i);
 		len += (entry->npos == 0) ? 1 : entry->npos;
 	}
 
@@ -79,7 +79,7 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 					s, l, (m))
 
 	int StopLow = 0;
-	int StopHigh = t->count;
+	int StopHigh = TS_COUNT(t);
 	int StopMiddle = StopHigh;
 	int	difference;
 	char *lexeme;
@@ -116,7 +116,7 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 
 		*nitem = 0;
 
-		while (StopMiddle < t->count)
+		while (StopMiddle < TS_COUNT(t))
 		{
 			lexeme = tsvector_getlexeme(t, StopMiddle, &we);
 
@@ -456,11 +456,11 @@ getWeights(ArrayType *win)
 Datum
 ts_rank_wttf(PG_FUNCTION_ARGS)
 {
-	ArrayType		   *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
-	TSVector			txt = PG_GETARG_TSVECTOR(1);
-	TSQuery				query = PG_GETARG_TSQUERY(2);
-	int					method = PG_GETARG_INT32(3);
-	float				res;
+	ArrayType  *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+	TSVector	txt = PG_GETARG_TSVECTOR(1);
+	TSQuery		query = PG_GETARG_TSQUERY(2);
+	int			method = PG_GETARG_INT32(3);
+	float		res;
 
 	res = calc_rank(getWeights(win), txt, query, method);
 
@@ -473,10 +473,10 @@ ts_rank_wttf(PG_FUNCTION_ARGS)
 Datum
 ts_rank_wtt(PG_FUNCTION_ARGS)
 {
-	ArrayType		   *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
-	TSVectorExpanded	txt = PG_GETARG_TSVECTOR(1);
-	TSQuery				query = PG_GETARG_TSQUERY(2);
-	float				res;
+	ArrayType  *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+	TSVector	txt = PG_GETARG_TSVECTOR(1);
+	TSQuery		query = PG_GETARG_TSQUERY(2);
+	float		res;
 
 	res = calc_rank(getWeights(win), txt, query, DEF_NORM_METHOD);
 
@@ -489,10 +489,10 @@ ts_rank_wtt(PG_FUNCTION_ARGS)
 Datum
 ts_rank_ttf(PG_FUNCTION_ARGS)
 {
-	TSVectorExpanded	txt = PG_GETARG_TSVECTOR(0);
-	TSQuery				query = PG_GETARG_TSQUERY(1);
-	int					method = PG_GETARG_INT32(2);
-	float				res;
+	TSVector	txt = PG_GETARG_TSVECTOR(0);
+	TSQuery		query = PG_GETARG_TSQUERY(1);
+	int			method = PG_GETARG_INT32(2);
+	float		res;
 
 	res = calc_rank(getWeights(NULL), txt, query, method);
 
@@ -504,9 +504,9 @@ ts_rank_ttf(PG_FUNCTION_ARGS)
 Datum
 ts_rank_tt(PG_FUNCTION_ARGS)
 {
-	TSVectorExpanded	txt = PG_GETARG_TSVECTOR(0);
-	TSQuery				query = PG_GETARG_TSQUERY(1);
-	float				res;
+	TSVector	txt = PG_GETARG_TSVECTOR(0);
+	TSQuery		query = PG_GETARG_TSQUERY(1);
+	float		res;
 
 	res = calc_rank(getWeights(NULL), txt, query, DEF_NORM_METHOD);
 
@@ -739,7 +739,7 @@ Cover(DocRepresentation *doc, int len, QueryRepresentation *qr, CoverExt *ext)
 }
 
 static DocRepresentation *
-get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
+get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 {
 	QueryItem  *item = GETQUERY(qr->query);
 	int32		dimt,			/* number of 'post' items */
@@ -780,6 +780,7 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 			WordEntry	*entry;
 			char		*lex = tsvector_getlexeme(txt, idx, &entry);
 
+			Assert(!entry->hasoff);
 			if (entry->npos)
 			{
 				dimt = entry->npos;
@@ -866,7 +867,7 @@ get_docrep(TSVectorExpanded txt, QueryRepresentation *qr, int *doclen)
 }
 
 static float4
-calc_rank_cd(const float4 *arrdata, TSVectorExpanded txt, TSQuery query, int method)
+calc_rank_cd(const float4 *arrdata, TSVector txt, TSQuery query, int method)
 {
 	DocRepresentation *doc;
 	int			len,
@@ -939,7 +940,7 @@ calc_rank_cd(const float4 *arrdata, TSVectorExpanded txt, TSQuery query, int met
 		NExtent++;
 	}
 
-	if ((method & RANK_NORM_LOGLENGTH) && txt->count > 0)
+	if ((method & RANK_NORM_LOGLENGTH) && TS_COUNT(txt) > 0)
 		Wdoc /= log((double) (cnt_length(txt) + 1));
 
 	if (method & RANK_NORM_LENGTH)
@@ -952,16 +953,17 @@ calc_rank_cd(const float4 *arrdata, TSVectorExpanded txt, TSQuery query, int met
 	if ((method & RANK_NORM_EXTDIST) && NExtent > 0 && SumDist > 0)
 		Wdoc /= ((double) NExtent) / SumDist;
 
-	if ((method & RANK_NORM_UNIQ) && txt->count > 0)
-		Wdoc /= (double) (txt->count);
+	if ((method & RANK_NORM_UNIQ) && TS_COUNT(txt) > 0)
+		Wdoc /= (double) (TS_COUNT(txt));
 
-	if ((method & RANK_NORM_LOGUNIQ) && txt->count > 0)
-		Wdoc /= log((double) (txt->count + 1)) / log(2.0);
+	if ((method & RANK_NORM_LOGUNIQ) && TS_COUNT(txt) > 0)
+		Wdoc /= log((double) (TS_COUNT(txt) + 1)) / log(2.0);
 
 	if (method & RANK_NORM_RDIVRPLUS1)
 		Wdoc /= (Wdoc + 1);
 
 	pfree(doc);
+
 	pfree(qr.operandData);
 
 	return (float4) Wdoc;
@@ -970,16 +972,16 @@ calc_rank_cd(const float4 *arrdata, TSVectorExpanded txt, TSQuery query, int met
 Datum
 ts_rankcd_wttf(PG_FUNCTION_ARGS)
 {
-	ArrayType		   *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
-	TSVector			txt = PG_GETARG_EXPANDED_TSVECTOR(1);
-	TSQuery				query = PG_GETARG_TSQUERY(2);
-	int					method = PG_GETARG_INT32(3);
-	float				res;
+	ArrayType  *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+	TSVector	txt = PG_GETARG_TSVECTOR(1);
+	TSQuery		query = PG_GETARG_TSQUERY(2);
+	int			method = PG_GETARG_INT32(3);
+	float		res;
 
 	res = calc_rank_cd(getWeights(win), txt, query, method);
 
 	PG_FREE_IF_COPY(win, 0);
-	PG_FREE_IF_COPY(txt, 0);
+	PG_FREE_IF_COPY(txt, 1);
 	PG_FREE_IF_COPY(query, 2);
 	PG_RETURN_FLOAT4(res);
 }
@@ -987,15 +989,15 @@ ts_rankcd_wttf(PG_FUNCTION_ARGS)
 Datum
 ts_rankcd_wtt(PG_FUNCTION_ARGS)
 {
-	ArrayType		   *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
-	TSVector			txt = PG_GETARG_TSVECTOR(1);
-	TSQuery				query = PG_GETARG_TSQUERY(2);
-	float				res;
+	ArrayType  *win = (ArrayType *) PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+	TSVector	txt = PG_GETARG_TSVECTOR(1);
+	TSQuery		query = PG_GETARG_TSQUERY(2);
+	float		res;
 
 	res = calc_rank_cd(getWeights(win), txt, query, DEF_NORM_METHOD);
 
 	PG_FREE_IF_COPY(win, 0);
-	PG_FREE_IF_COPY(txt, 0);
+	PG_FREE_IF_COPY(txt, 1);
 	PG_FREE_IF_COPY(query, 2);
 	PG_RETURN_FLOAT4(res);
 }
@@ -1003,10 +1005,10 @@ ts_rankcd_wtt(PG_FUNCTION_ARGS)
 Datum
 ts_rankcd_ttf(PG_FUNCTION_ARGS)
 {
-	TSVector			txt = PG_GETARG_TSVECTOR(0);
-	TSQuery				query = PG_GETARG_TSQUERY(1);
-	int					method = PG_GETARG_INT32(2);
-	float				res;
+	TSVector	txt = PG_GETARG_TSVECTOR(0);
+	TSQuery		query = PG_GETARG_TSQUERY(1);
+	int			method = PG_GETARG_INT32(2);
+	float		res;
 
 	res = calc_rank_cd(getWeights(NULL), txt, query, method);
 
@@ -1018,9 +1020,9 @@ ts_rankcd_ttf(PG_FUNCTION_ARGS)
 Datum
 ts_rankcd_tt(PG_FUNCTION_ARGS)
 {
-	TSVector			txt = PG_GETARG_TSVECTOR(0);
-	TSQuery				query = PG_GETARG_TSQUERY(1);
-	float				res;
+	TSVector	txt = PG_GETARG_TSVECTOR(0);
+	TSQuery		query = PG_GETARG_TSQUERY(1);
+	float		res;
 
 	res = calc_rank_cd(getWeights(NULL), txt, query, DEF_NORM_METHOD);
 

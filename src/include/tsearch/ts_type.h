@@ -125,8 +125,7 @@ typedef TSVectorData *TSVector;
 #define ENTRY_LEN(x,we) (UNWRAP_ENTRY(x,we)->len)
 
 /* pointer to start of positions */
-#define POSDATAPTR(we,lexeme) \
-	((WordEntryPos *) (lexeme + SHORTALIGN(ENTRY_LEN(we))))
+#define POSDATAPTR(lex, len) ((WordEntryPos *) (lex + SHORTALIGN(len)))
 
 /* increment entry and offset by given WordEntry */
 #define IncrPtr(x,w,p) \
@@ -134,8 +133,8 @@ do { \
 	WordEntry *y = (w);									\
 	if ((w)->hasoff)									\
 	{													\
-		y = STRPTR(x) + (w)->offset;					\
-		(p) += (w)->offset + sizeof(WordEntry);			\
+		y = (WordEntry *) (STRPTR(x) + (w)->offset);	\
+		(p) = (w)->offset + sizeof(WordEntry);			\
 	}													\
 	Assert(!y->hasoff);									\
 	(p) += SHORTALIGN(y->len) + y->npos * sizeof(WordEntryPos); \
@@ -320,5 +319,8 @@ typedef TSQueryData *TSQuery;
 #define PG_GETARG_TSQUERY(n)		DatumGetTSQuery(PG_GETARG_DATUM(n))
 #define PG_GETARG_TSQUERY_COPY(n)	DatumGetTSQueryCopy(PG_GETARG_DATUM(n))
 #define PG_RETURN_TSQUERY(x)		return TSQueryGetDatum(x)
+
+char *tsvector_addlexeme(TSVector tsv, int idx, uint32 *dataoff,
+		char *lexeme, int lexeme_len, WordEntryPos *pos, int npos);
 
 #endif   /* _PG_TSTYPE_H_ */

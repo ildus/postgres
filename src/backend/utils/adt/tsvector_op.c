@@ -68,8 +68,7 @@ typedef struct
 #define STATHDRSIZE (offsetof(TSVectorStat, data))
 
 static Datum tsvector_update_trigger(PG_FUNCTION_ARGS, bool config_column);
-static int	tsvector_bsearch(const TSVector vec, char *lexeme,
-							 int lexeme_len);
+static int	tsvector_bsearch(const TSVector tsv, char *lexeme, int lexeme_len);
 
 /*
  * Order: npos, len, word, for all positions (pos, weight)
@@ -122,7 +121,7 @@ silly_cmp_tsvector(const TSVector a, const TSVector b)
 				if (npos1 != npos2)
 					return (npos1 > npos2) ? -1 : 1;
 
-				for (j = 0; j < npos1, j++)
+				for (j = 0; j < npos1; j++)
 				{
 					if (WEP_GETPOS(*ap) != WEP_GETPOS(*bp))
 					{
@@ -174,11 +173,9 @@ tsvector_strip(PG_FUNCTION_ARGS)
 	int			i,
 				count,
 				len = 0,
-				pos = 0,
-				posout = 0;
-	char	   *dataout;
-	WordEntry  *entryin = ARRPTR(in),
-			   *entryout;
+				offset = 0;
+	uint32		posout = 0;
+	WordEntry  *entryin = ARRPTR(in);
 
 	count = TS_COUNT(in);
 	for (i = 0; i < count; i++)
@@ -189,19 +186,13 @@ tsvector_strip(PG_FUNCTION_ARGS)
 	SET_VARSIZE(out, len);
 	TS_SETCOUNT(out, count);
 
-	entryout = ARRPTR(out);
-	dataout = STRPTR(out);
-
 	for (i = 0; i < count; i++)
 	{
-		char *lexeme = STRPTR(in) + pos;
+		char *lexeme = STRPTR(in) + offset;
+		tsvector_addlexeme(out, i, &posout, lexeme, ENTRY_LEN(in, entryin),
+				NULL, 0);
 
-		memcpy(dataout + posout, lexeme, entryin->len);
-		entryout->npos = 0;
-		entryout->len = entryin->len;
-
-		IncrPtr(entryin, pos);
-		IncrPtr(entryout, posout);
+		IncrPtr(in, entryin, offset);
 	}
 
 	PG_FREE_IF_COPY(in, 0);
@@ -257,14 +248,16 @@ tsvector_setweight(PG_FUNCTION_ARGS)
 	entry = ARRPTR(out);
 	for (i = 0; i < TS_COUNT(out); i++)
 	{
-		int j;
-		if (entry->npos)
+		int j,
+			npos = ENTRY_NPOS(out, entry);
+
+		if (npos)
 		{
-			WordEntryPos *p = POSDATAPTR(STRPTR(out) + pos, entry->len);
-			for (j = 0; j < entry->npos; j++)
+			WordEntryPos *p = POSDATAPTR(STRPTR(out) + pos, ENTRY_LEN(out, entry));
+			for (j = 0; j < npos; j++)
 				WEP_SETWEIGHT(p[j], w);
 		}
-		IncrPtr(entry, pos);
+		IncrPtr(out, entry, pos);
 	}
 
 	PG_FREE_IF_COPY(in, 0);
@@ -279,16 +272,16 @@ tsvector_setweight(PG_FUNCTION_ARGS)
 Datum
 tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 {
-	TSVector			tsout = PG_GETARG_TSVECTOR_COPY(0),
-						tsin = PG_GETARG_TSVECTOR(0);
-	char				char_weight = PG_GETARG_CHAR(1);
-	ArrayType		   *lexemes = PG_GETARG_ARRAYTYPE_P(2);
+	TSVector	tsin = PG_GETARG_TSVECTOR(0);
+	char		char_weight = PG_GETARG_CHAR(1);
+	ArrayType  *lexemes = PG_GETARG_ARRAYTYPE_P(2);
 
-	int					i,
-						nlexemes,
-						weight;
-	Datum			   *dlexemes;
-	bool			   *nulls;
+	TSVector	tsout;
+	int			i,
+				nlexemes,
+				weight;
+	Datum	   *dlexemes;
+	bool	   *nulls;
 
 	switch (char_weight)
 	{
@@ -313,6 +306,8 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 			elog(ERROR, "unrecognized weight: %c", char_weight);
 	}
 
+	tsout = (TSVector) palloc(VARSIZE(tsin));
+	memcpy(tsout, tsin, VARSIZE(tsin));
 	deconstruct_array(lexemes, TEXTOID, -1, false, 'i',
 					  &dlexemes, &nulls, &nlexemes);
 
@@ -325,7 +320,7 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 	{
 		char	   *lex;
 		int			lex_len,
-					lex_pos;
+					lex_idx;
 		WordEntry  *entry;
 
 		if (nulls[i])
@@ -335,14 +330,15 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 
 		lex = VARDATA(dlexemes[i]);
 		lex_len = VARSIZE(dlexemes[i]) - VARHDRSZ;
-		lex_pos = tsvector_bsearch(tsin, lex, lex_len);
-		entry = ARRPTR(tsout) + lex_pos;
+		lex_idx = tsvector_bsearch(tsout, lex, lex_len);
+		entry = ARRPTR(tsout) + lex_idx;
 
-		if (lex_pos >= 0 && entry->npos > 0)
+		if (lex_idx >= 0 && entry->npos > 0)
 		{
-			int				j;
-			int				offset = tsvector_getoffset(tsin, lex_pos, NULL);
-			WordEntryPos   *p = POSDATAPTR(entry, offset);
+			int		j;
+			char   *lexeme = tsvector_getlexeme(tsin, lex_idx, NULL);
+
+			WordEntryPos   *p = POSDATAPTR(lexeme, lex_len);
 
 			for (j = 0; j < ENTRY_NPOS(tsin, entry); j++)
 				WEP_SETWEIGHT(p[j], weight);
@@ -351,6 +347,7 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 
 	PG_FREE_IF_COPY(tsin, 0);
 	PG_FREE_IF_COPY(lexemes, 2);
+
 	PG_RETURN_POINTER(tsout);
 }
 
@@ -365,10 +362,10 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
  * found.
  */
 static int
-tsvector_bsearch(const TSVector vec, char *lexeme, int lexeme_len)
+tsvector_bsearch(const TSVector tsv, char *lexeme, int lexeme_len)
 {
 	int			StopLow = 0,
-				StopHigh = vec->count,
+				StopHigh = TS_COUNT(tsv),
 				StopMiddle,
 				cmp;
 
@@ -378,9 +375,9 @@ tsvector_bsearch(const TSVector vec, char *lexeme, int lexeme_len)
 		char	   *str;
 
 		StopMiddle = (StopLow + StopHigh) / 2;
-		str = tsvector_getlexeme(vec, StopMiddle, &entry);
+		str = tsvector_getlexeme(tsv, StopMiddle, &entry);
 		cmp = tsCompareString(lexeme, lexeme_len,
-							  str, ENTRY_LEN(vec, entry), false);
+							  str, ENTRY_LEN(tsv, entry), false);
 
 		if (cmp < 0)
 			StopHigh = StopMiddle;
@@ -431,94 +428,10 @@ compare_text_lexemes(const void *va, const void *vb)
  * and weights.
  */
 static TSVector
-tsvector_delete_by_indices(TSVectorExpanded vec, int *indices_to_delete,
+tsvector_delete_by_indices(TSVector tsv, int *indices_to_delete,
 						   int indices_count)
 {
-	TSVector	tsin = (TSVector) PG_DETOAST_DATUM(vec->datum),
-				tsout;
-	WordEntry  *entryin,
-			   *entryout;
-	char	   *data = STRPTR(tsin),
-			   *dataout;
-	int			i,				/* index in tsin */
-				k,				/* index in indices_to_delete */
-				posin = 0,
-				posout = 0;
-
-	/*
-	 * Sort the filter array to simplify membership checks below.  Also, get
-	 * rid of any duplicate entries, so that we can assume that indices_count
-	 * is exactly equal to the number of lexemes that will be removed.
-	 */
-	if (indices_count > 1)
-	{
-		int			kp;
-
-		qsort(indices_to_delete, indices_count, sizeof(int), compare_int);
-		kp = 0;
-		for (k = 1; k < indices_count; k++)
-		{
-			if (indices_to_delete[k] != indices_to_delete[kp])
-				indices_to_delete[++kp] = indices_to_delete[k];
-		}
-		indices_count = ++kp;
-	}
-
-	/*
-	 * Here we overestimate tsout size, since we don't know how much space is
-	 * used by the deleted lexeme(s).  We will set exact size below.
-	 */
-	tsout = (TSVector) palloc0(VARSIZE(tsin));
-
-	/* This count must be correct because STRPTR(tsout) relies on it. */
-	TS_SETCOUNT(tsout, TS_COUNT(tsin) - indices_count);
-
-	/*
-	 * Copy tsin to tsout, skipping lexemes listed in indices_to_delete.
-	 */
-	entryin = ARRPTR(tsin);
-	entryout = ARRPTR(tsout);
-	dataout = STRPTR(tsout);
-
-	for (i = k = 0; i < TS_COUNT(tsin); i++)
-	{
-		/*
-		 * If current i is present in indices_to_delete, skip this lexeme.
-		 * Since indices_to_delete is already sorted, we only need to check
-		 * the current (k'th) entry.
-		 */
-		if (k < indices_count && i == indices_to_delete[k])
-		{
-			k++;
-			goto next;
-		}
-
-		/* Copy lexeme and its positions and weights */
-		memcpy(dataout + posout, data + posin, entryin->len);
-		entryout->npos = entryin->npos;
-		entryout->len = entryin->len;
-
-		if (entryin->npos)
-		{
-			int			len = sizeof(WordEntryPos) * entryin->npos;
-			memcpy(POSDATAPTR(dataout + posout, entryout->len),
-				   POSDATAPTR(data + posin, entryin->len),
-				   len);
-		}
-
-		IncrPtr(entryout, posout);
-next:
-		IncrPtr(entryin, posin);
-	}
-
-	/*
-	 * k should now be exactly equal to indices_count. If it isn't then the
-	 * caller provided us with indices outside of [0, tsin->size) range and
-	 * estimation of tsout's size is wrong.
-	 */
-	Assert(k == indices_count);
-
-	SET_VARSIZE(tsout, CALCDATASIZE(TS_COUNT(tsout), posout));
+	TSVector	tsout = (TSVector) PG_DETOAST_DATUM_COPY(tsv);
 	return tsout;
 }
 
@@ -529,18 +442,19 @@ next:
 Datum
 tsvector_delete_str(PG_FUNCTION_ARGS)
 {
-	TSVectorExpanded	tsin = PG_GETARG_EXPANDED_TSVECTOR(0);
-	TSVector			tsout;
-	text			   *tlexeme = PG_GETARG_TEXT_PP(1);
-	char			   *lexeme = VARDATA_ANY(tlexeme);
-	int					lexeme_len = VARSIZE_ANY_EXHDR(tlexeme),
-						skip_index;
+	TSVector	tsin = PG_GETARG_TSVECTOR(0),
+				tsout;
+	text	   *tlexeme = PG_GETARG_TEXT_PP(1);
+	char	   *lexeme = VARDATA_ANY(tlexeme);
+	int			lexeme_len = VARSIZE_ANY_EXHDR(tlexeme),
+				skip_index;
 
 	if ((skip_index = tsvector_bsearch(tsin, lexeme, lexeme_len)) == -1)
-		PG_RETURN_POINTER(tsin->datum);
+		PG_RETURN_POINTER(tsin);
 
 	tsout = tsvector_delete_by_indices(tsin, &skip_index, 1);
 
+	PG_FREE_IF_COPY(tsin, 0);
 	PG_FREE_IF_COPY(tlexeme, 1);
 	PG_RETURN_POINTER(tsout);
 }
@@ -552,8 +466,8 @@ tsvector_delete_str(PG_FUNCTION_ARGS)
 Datum
 tsvector_delete_arr(PG_FUNCTION_ARGS)
 {
-	TSVectorExpanded	tsin = PG_GETARG_EXPANDED_TSVECTOR(0);
-	TSVector			tsout;
+	TSVector	tsin = PG_GETARG_TSVECTOR(0),
+				tsout;
 	ArrayType  *lexemes = PG_GETARG_ARRAYTYPE_P(1);
 	int			i,
 				nlex,
@@ -610,7 +524,7 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 {
 	FuncCallContext	   *funcctx;
 	TSVector			tsin;
-	int					lex_pos;
+	int					offset;
 
 	if (SRF_IS_FIRSTCALL())
 	{
@@ -636,24 +550,26 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 
 	funcctx = SRF_PERCALL_SETUP();
 	tsin = (TSVector) linitial(funcctx->user_fctx);
-	lex_pos = intVal(lsecond(funcctx->user_fctx));
+	offset = intVal(lsecond(funcctx->user_fctx));
 
 	if (funcctx->call_cntr < TS_COUNT(tsin))
 	{
 		WordEntry  *entry = ARRPTR(tsin) + funcctx->call_cntr;
 		char	   *data = STRPTR(tsin);
 		HeapTuple	tuple;
-		int			j;
+		int			j,
+					npos = ENTRY_NPOS(tsin, entry),
+					lex_len = ENTRY_LEN(tsin, entry);
 		bool		nulls[] = {false, false, false};
 		Datum		values[3];
 
 		values[0] = PointerGetDatum(
-				  cstring_to_text_with_len(data + lex_pos, entry->len)
+				  cstring_to_text_with_len(data + offset, lex_len)
 			);
 
-		if (entry->npos)
+		if (npos)
 		{
-			WordEntryPos *pos = POSDATAPTR(data + lex_pos, entry->len);
+			WordEntryPos *pos = POSDATAPTR(data + offset, lex_len);
 			Datum	   *positions;
 			Datum	   *weights;
 			char		weight;
@@ -663,9 +579,9 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 			 * uint16 (2 bits for weight, 14 for position). Here we extract
 			 * that in two separate arrays.
 			 */
-			positions = palloc(entry->npos * sizeof(Datum));
-			weights = palloc(entry->npos * sizeof(Datum));
-			for (j = 0; j < entry->npos; j++)
+			positions = palloc(npos * sizeof(Datum));
+			weights = palloc(npos * sizeof(Datum));
+			for (j = 0; j < npos; j++)
 			{
 				positions[j] = Int16GetDatum(WEP_GETPOS(pos[j]));
 				weight = 'D' - WEP_GETWEIGHT(pos[j]);
@@ -675,16 +591,16 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 			}
 
 			values[1] = PointerGetDatum(
-			  construct_array(positions, entry->npos, INT2OID, 2, true, 's'));
+			  construct_array(positions, npos, INT2OID, 2, true, 's'));
 			values[2] = PointerGetDatum(
-			  construct_array(weights, entry->npos, TEXTOID, -1, false, 'i'));
+			  construct_array(weights, npos, TEXTOID, -1, false, 'i'));
 		}
 		else
 		{
 			nulls[1] = nulls[2] = true;
 		}
 
-		IncrPtr(entry, intVal(lsecond(funcctx->user_fctx)));
+		IncrPtr(tsin, entry, intVal(lsecond(funcctx->user_fctx)));
 		tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 		SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
 	}
@@ -704,19 +620,18 @@ tsvector_to_array(PG_FUNCTION_ARGS)
 	TSVector	tsin = PG_GETARG_TSVECTOR(0);
 	WordEntry  *entry = ARRPTR(tsin);
 	Datum	   *elements;
-	int			i = 0,
-				pos = 0,
-				len = TS_COUNT(tsin);
+	int			i,
+				pos = 0;
 	ArrayType  *array;
 
 	elements = palloc(TS_COUNT(tsin) * sizeof(Datum));
 
-	while (len--)
+	for (i = 0; i < TS_COUNT(tsin); i++)
 	{
-		elements[i++] = PointerGetDatum(
-		  cstring_to_text_with_len(STRPTR(tsin) + pos, entry->len)
+		elements[i] = PointerGetDatum(
+		  cstring_to_text_with_len(STRPTR(tsin) + pos, ENTRY_LEN(tsin, entry))
 			);
-		IncrPtr(entry, pos);
+		IncrPtr(tsin, entry, pos);
 	}
 
 	array = construct_array(elements, TS_COUNT(tsin), TEXTOID, -1, false, 'i');
@@ -724,6 +639,75 @@ tsvector_to_array(PG_FUNCTION_ARGS)
 	pfree(elements);
 	PG_FREE_IF_COPY(tsin, 0);
 	PG_RETURN_POINTER(array);
+}
+
+
+/* Returns pointer to lexeme start */
+char *
+tsvector_addlexeme(TSVector tsv, int idx, uint32 *dataoff,
+		char *lexeme, int lexeme_len, WordEntryPos *pos, int npos)
+{
+	uint32		stroff;
+	WordEntry  *entry;
+	char	   *result;
+
+	stroff = *dataoff;
+	stroff = SHORTALIGN(stroff);
+
+	entry = ARRPTR(tsv) + idx;
+
+	if (idx % TS_OFFSET_STRIDE == 0)
+	{
+		/* WordEntry with offset */
+		WordEntry offentry;
+		entry->hasoff = 1;
+		entry->offset = stroff;
+
+		/* fill WordEntry for offset */
+		offentry.hasoff = 0;
+		offentry.len = lexeme_len;
+		offentry.npos = npos;
+		memcpy(STRPTR(tsv) + stroff, &offentry, sizeof(WordEntry));
+		stroff += sizeof(WordEntry);
+	}
+	else
+	{
+		entry->hasoff = 0;
+		entry->len = lexeme_len;
+		entry->npos = npos;
+	}
+
+	memcpy(STRPTR(tsv) + stroff, lexeme, lexeme_len);
+	result = STRPTR(tsv) + stroff;
+	stroff += lexeme_len;
+
+	if (npos)
+	{
+		if (npos > 0xFFFF)
+			elog(ERROR, "positions array too long");
+
+		/*
+		 * Pad to 2-byte alignment if necessary. We don't know how memory was
+		 * allocated, so in case of aligning we need to make sure that unused
+		 * is zero.
+		 */
+		if (stroff != SHORTALIGN(stroff))
+		{
+			*(STRPTR(tsv) + stroff) = '\0';
+			stroff = SHORTALIGN(stroff);
+		}
+
+		/* Copy positions */
+		if (pos)
+			memcpy(STRPTR(tsv) + stroff, pos, npos * sizeof(WordEntryPos));
+
+		stroff += npos * sizeof(WordEntryPos);
+	}
+
+	stroff = SHORTALIGN(stroff);
+	*dataoff = stroff;
+
+	return result;
 }
 
 /*
@@ -735,14 +719,13 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 	ArrayType  *v = PG_GETARG_ARRAYTYPE_P(0);
 	TSVector	tsout;
 	Datum	   *dlexemes;
-	WordEntry  *arrout;
 	bool	   *nulls;
 	int			nitems,
 				i,
 				j,
 				tslen,
 				datalen = 0;
-	char	   *cur;
+	uint32		cur = 0;
 
 	deconstruct_array(v, TEXTOID, -1, false, 'i', &dlexemes, &nulls, &nitems);
 
@@ -778,17 +761,12 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 	SET_VARSIZE(tsout, tslen);
 	TS_SETCOUNT(tsout, nitems);
 
-	arrout = ARRPTR(tsout);
-	cur = STRPTR(tsout);
 	for (i = 0; i < nitems; i++)
 	{
 		char	   *lex = VARDATA(dlexemes[i]);
 		int			lex_len = VARSIZE(dlexemes[i]) - VARHDRSZ;
 
-		memcpy(cur, lex, lex_len);
-		arrout[i].npos = 0;
-		arrout[i].len = lex_len;
-		cur += SHORTALIGN(lex_len);
+		tsvector_addlexeme(tsout, i, &cur, lex, lex_len, NULL, 0);
 	}
 
 	PG_FREE_IF_COPY(v, 0);
@@ -801,112 +779,8 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 Datum
 tsvector_filter(PG_FUNCTION_ARGS)
 {
-	TSVector	tsin = PG_GETARG_TSVECTOR(0),
-				tsout;
-	ArrayType  *weights = PG_GETARG_ARRAYTYPE_P(1);
-	WordEntry  *entryin,
-			   *entryout;
-	char	   *datain = STRPTR(tsin),
-			   *dataout;
-	Datum	   *dweights;
-	bool	   *nulls;
-	int			nweights;
-	int			i,
-				copied,
-				len,
-				posin = 0,
-				posout = 0;
-	char		mask = 0;
-
-	deconstruct_array(weights, CHAROID, 1, true, 'c',
-					  &dweights, &nulls, &nweights);
-
-	for (i = 0; i < nweights; i++)
-	{
-		char		char_weight;
-
-		if (nulls[i])
-			ereport(ERROR,
-					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-					 errmsg("weight array may not contain nulls")));
-
-		char_weight = DatumGetChar(dweights[i]);
-		switch (char_weight)
-		{
-			case 'A':
-			case 'a':
-				mask = mask | 8;
-				break;
-			case 'B':
-			case 'b':
-				mask = mask | 4;
-				break;
-			case 'C':
-			case 'c':
-				mask = mask | 2;
-				break;
-			case 'D':
-			case 'd':
-				mask = mask | 1;
-				break;
-			default:
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("unrecognized weight: \"%c\"", char_weight)));
-		}
-	}
-
-	tsout = (TSVector) palloc0(VARSIZE(tsin));
-	TS_SETCOUNT(tsout, TS_COUNT(tsin));
-	entryin = ARRPTR(tsin);
-	entryout = ARRPTR(tsout);
-	dataout = STRPTR(tsout);
-	len = TS_COUNT(tsin);
-	copied = 0;
-
-	while (len--)
-	{
-		WordEntryPos   *posvin,
-					   *posvout;
-		int				npos = 0,
-						k;
-
-		if (!entryin->npos)
-			goto next;
-
-		posvin = POSDATAPTR(datain + posin, entryin->len);
-		posvout = POSDATAPTR(dataout + posout, entryin->len);
-
-		for (k = 0; k < entryin->npos; k++)
-		{
-			if (mask & (1 << WEP_GETWEIGHT(posvin[k])))
-				posvout[npos++] = posvin[k];
-		}
-
-		/* if no satisfactory positions found, skip lexeme */
-		if (!npos)
-			goto next;
-
-		entryout->npos = npos;
-		entryout->len = entryin->len;
-		copied++;
-
-		/* copy text */
-		memcpy(dataout + posout, datain + posin, entryin->len);
-
-		IncrPtr(entryout, posout);
-next:
-		IncrPtr(entryin, posin);
-	}
-
-	TS_SETCOUNT(tsout, copied);
-	if (dataout != STRPTR(tsout))
-		memmove(STRPTR(tsout), dataout, posout);
-
-	SET_VARSIZE(tsout, CALCDATASIZE(TS_COUNT(tsout), posout));
-
-	PG_FREE_IF_COPY(tsin, 0);
-	PG_RETURN_POINTER(tsout);
+	TSVector	tsin = PG_GETARG_TSVECTOR_COPY(0);
+	PG_RETURN_POINTER(tsin);
 }
 
 Datum
