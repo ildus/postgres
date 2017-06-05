@@ -165,7 +165,7 @@ make_tsvector(ParsedText *prs)
 	prs->curwords = uniqueWORD(prs->words, prs->curwords);
 	for (i = 0; i < prs->curwords; i++)
 	{
-		lenstr += prs->words[i].len;
+		lenstr += SHORTALIGN(prs->words[i].len);
 		if (prs->words[i].alen)
 		{
 			lenstr = SHORTALIGN(lenstr);
@@ -188,33 +188,47 @@ make_tsvector(ParsedText *prs)
 	stroff = 0;
 	for (i = 0; i < prs->curwords; i++)
 	{
-		char *strloc;
+		int npos = 0;
+		if (prs->words[i].alen)
+			npos = prs->words[i].pos.apos[0];
 
-		ptr->len = prs->words[i].len;
-		ptr->npos = 0;
+		if (npos > 0xFFFF)
+			elog(ERROR, "positions array too long");
 
 		stroff = SHORTALIGN(stroff);
-		strloc = str + stroff;
-		memcpy(strloc, prs->words[i].word, prs->words[i].len);
+		if (i % TS_OFFSET_STRIDE == 0)
+		{
+			WordEntry ptr_off;
+			ptr->hasoff = 1;
+			ptr->offset = stroff;
+
+			ptr_off.hasoff = 0;
+			ptr_off.len = prs->words[i].len;
+			ptr_off.npos = npos;
+			memcpy(str + stroff, &ptr_off, sizeof(WordEntry));
+			stroff += sizeof(WordEntry);
+		}
+		else
+		{
+			ptr->len = prs->words[i].len;
+			ptr->npos = npos;
+		}
+
+		memcpy(str + stroff, prs->words[i].word, prs->words[i].len);
 		stroff += prs->words[i].len;
 		pfree(prs->words[i].word);
 		if (prs->words[i].alen)
 		{
-			int			k = prs->words[i].pos.apos[0];
 			WordEntryPos *wptr;
 
-			if (k > 0xFFFF)
-				elog(ERROR, "positions array too long");
-
 			stroff = SHORTALIGN(stroff);
-			ptr->npos = (uint16) k;
-			wptr = POSDATAPTR(strloc, prs->words[i].len);
-			for (j = 0; j < k; j++)
+			wptr = (WordEntryPos *) (str + stroff);
+			for (j = 0; j < npos; j++)
 			{
 				WEP_SETWEIGHT(wptr[j], 0);
 				WEP_SETPOS(wptr[j], prs->words[i].pos.apos[j + 1]);
 			}
-			stroff += k * sizeof(WordEntryPos);
+			stroff += npos * sizeof(WordEntryPos);
 			pfree(prs->words[i].pos.apos);
 		}
 

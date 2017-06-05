@@ -206,13 +206,13 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 			pg_crc32	c;
 
 			INIT_LEGACY_CRC32(c);
-			COMP_LEGACY_CRC32(c, words + pos, ptr->len);
+			COMP_LEGACY_CRC32(c, words + pos, ENTRY_LEN(val, ptr));
 			FIN_LEGACY_CRC32(c);
 
 			*arr = *(int32 *) &c;
 			arr++;
 
-			IncrPtr(ptr, pos);
+			IncrPtr(val, ptr, pos);
 		}
 
 		len = uniqueint(GETARR(res), tscount);

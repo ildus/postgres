@@ -39,12 +39,18 @@
  * Note, tsvectorsend/recv believe that sizeof(WordEntry) == 4
  */
 
+#define TS_OFFSET_STRIDE 4
+
 typedef struct
 {
-	uint32
-		len:11,
-		npos:16,
-		_unused:5;
+	union {
+		uint32 hasoff_: 1,
+			   offset: 31;
+		uint32 hasoff: 1,
+			   len:11,
+			   npos: 16,
+			   _unused: 4;
+	};
 } WordEntry;
 
 #define MAXSTRLEN ( (1<<11) - 1)
@@ -62,19 +68,6 @@ extern int	compareWordEntryPos(const void *a, const void *b);
  */
 
 typedef uint16 WordEntryPos;
-
-typedef struct
-{
-	uint16		npos;
-	WordEntryPos pos[FLEXIBLE_ARRAY_MEMBER];
-} WordEntryPosVector;
-
-/* WordEntryPosVector with exactly 1 entry */
-typedef struct
-{
-	uint16		npos;
-	WordEntryPos pos[1];
-} WordEntryPosVector1;
 
 
 #define WEP_GETWEIGHT(x)	( (x) >> 14 )
@@ -107,27 +100,9 @@ typedef struct
 
 typedef TSVectorData *TSVector;
 
-typedef struct ExpandedTSVectorHeader
-{
-	/* Standart header for expanded objects */
-	ExpandedObjectHeader hdr;
-
-	/* Magic value identifying an expanded tsvector (for debugging only) */
-	uint32		ev_magic;
-
-	Datum		datum;			/* original datum */
-	WordEntry  *entries;
-	uint32		count;			/* lexemes count */
-	uint32	   *positions;		/* entry positions cache, calculated */
-	size_t		maxidx;			/* count of calculated indices */
-	char*		cached_data;	/* optimization for small tsvectors */
-} ExpandedTSVectorHeader;
-
-typedef ExpandedTSVectorHeader *TSVectorExpanded;
-
-#define TS_FLAG_EXPANDED 0x80000000
+#define TS_FLAG_STRETCHED 0x80000000
 #define TS_COUNT(t) ((t)->size_ & 0x0FFFFFFF)
-#define TS_SETCOUNT(t,c) ((t)->size_ = (c) | TS_FLAG_EXPANDED)
+#define TS_SETCOUNT(t,c) ((t)->size_ = (c) | TS_FLAG_STRETCHED)
 
 #define DATAHDRSIZE (offsetof(TSVectorData, entries))
 #define CALCDATASIZE(nentries, lenstr) (DATAHDRSIZE + (nentries) * sizeof(WordEntry) + (lenstr) )
@@ -138,21 +113,33 @@ typedef ExpandedTSVectorHeader *TSVectorExpanded;
 /* pointer to start of a tsvector's lexeme storage */
 #define STRPTR(x)	( (char *) &(x)->entries[TS_COUNT(x)] )
 
-/*
- * pointer to start of positions, requires lexeme pointer
- * and length of lexeme
- */
-#define POSDATAPTR(lex,len) ((WordEntryPos *)((lex) + SHORTALIGN(len)))
+/* for WordEntry with offset return its WordEntry with other properties */
+#define UNWRAP_ENTRY(x,we) \
+	((we)->hasoff? (WordEntry *)(STRPTR(x) + (we)->offset): (we))
 
-/* increments WordEntry pointer and moves pos to next lexeme position */
-#define IncrPtr(we, pos) \
+/*
+ * helpers used when we're not sure that WordEntry
+ * contains properties not offset
+ */
+#define ENTRY_NPOS(x,we) (UNWRAP_ENTRY(x,we)->npos)
+#define ENTRY_LEN(x,we) (UNWRAP_ENTRY(x,we)->len)
+
+/* pointer to start of positions */
+#define POSDATAPTR(we,lexeme) \
+	((WordEntryPos *) (lexeme + SHORTALIGN(ENTRY_LEN(we))))
+
+/* increment entry and offset by given WordEntry */
+#define IncrPtr(x,w,p) \
 do { \
-	if ((we)->npos == 0) \
-		(pos) += (we)->len; \
-	else \
-		(pos) = SHORTALIGN((pos) + (we)->len) + (we)->npos * sizeof(WordEntryPos); \
-	(we)++; \
-	(pos) = SHORTALIGN(pos); \
+	WordEntry *y = (w);									\
+	if ((w)->hasoff)									\
+	{													\
+		y = STRPTR(x) + (w)->offset;					\
+		(p) += (w)->offset + sizeof(WordEntry);			\
+	}													\
+	Assert(!y->hasoff);									\
+	(p) += SHORTALIGN(y->len) + y->npos * sizeof(WordEntryPos); \
+	(w)++;												\
 } while (0);
 
 /*
@@ -166,9 +153,56 @@ do { \
 #define PG_GETARG_TSVECTOR_COPY(n)	DatumGetTSVectorCopy(PG_GETARG_DATUM(n))
 #define PG_RETURN_TSVECTOR(x)		return TSVectorGetDatum(x)
 
-/* fmgr macros for expanded tsvector objects */
-#define PG_GETARG_EXPANDED_TSVECTOR(n) \
-	DatumGetExpandedTSVector(PG_GETARG_DATUM(n))
+/*
+ * Returns offset by given index in TSVector,
+ * this function used when we need random access
+ */
+inline static uint32
+tsvector_getoffset(TSVector vec, int idx, WordEntry **we)
+{
+	uint32		offset = 0;
+	WordEntry  *entry;
+
+	entry = ARRPTR(vec) + idx;
+	if (we)
+		*we = entry;
+
+	while (!entry->hasoff)
+	{
+		offset += SHORTALIGN(entry->len) + entry->npos * sizeof(WordEntryPos);
+		entry--;
+	}
+
+	Assert(entry >= ARRPTR(vec));
+	offset += entry->offset;
+
+	if (idx % TS_OFFSET_STRIDE)
+	{
+		WordEntry *offset_entry = (WordEntry *) (STRPTR(vec) + entry->offset);
+		offset += SHORTALIGN(offset_entry->len) + offset_entry->npos * sizeof(WordEntryPos);
+	} else
+	{
+		if (we)
+			*we = (WordEntry *) (STRPTR(vec) + offset);
+		offset += sizeof(WordEntry);
+	}
+
+	return offset;
+}
+
+/* Returns lexeme and its entry by given index from TSVector */
+inline static char *
+tsvector_getlexeme(TSVector vec, int idx, WordEntry **we)
+{
+	Assert(idx >=0 && idx < TS_COUNT(vec));
+
+	/*
+	 * we do not allow we == NULL because returned lexeme is not \0 ended,
+	 * and always should be used with we->len
+	 */
+	Assert(we != NULL);
+	return STRPTR(vec) + tsvector_getoffset(vec, idx, we);
+}
 
 /*
  * TSQuery
@@ -286,8 +320,5 @@ typedef TSQueryData *TSQuery;
 #define PG_GETARG_TSQUERY(n)		DatumGetTSQuery(PG_GETARG_DATUM(n))
 #define PG_GETARG_TSQUERY_COPY(n)	DatumGetTSQueryCopy(PG_GETARG_DATUM(n))
 #define PG_RETURN_TSQUERY(x)		return TSQueryGetDatum(x)
-
-ExpandedTSVectorHeader *DatumGetExpandedTSVector(Datum d);
-extern TSVector tsvector_upgrade(Datum);
 
 #endif   /* _PG_TSTYPE_H_ */

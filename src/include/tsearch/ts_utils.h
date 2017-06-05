@@ -35,10 +35,6 @@ extern bool gettoken_tsvector(TSVectorParseState state,
 				  char **endptr);
 extern void close_tsvector_parser(TSVectorParseState state);
 
-/* expanded tsvector helper */
-extern char *tsvector_getlexeme(TSVectorExpanded vec, int idx, WordEntry **we);
-int tsvector_getposition(TSVectorExpanded vec, int idx);
-
 /* parse_tsquery */
 
 struct TSQueryParserStateData;	/* private in backend/utils/adt/tsquery.c */

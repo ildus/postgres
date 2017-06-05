@@ -181,7 +181,6 @@ tsvectorin(PG_FUNCTION_ARGS)
 	WordEntryIN *arr;
 	int			totallen;
 	int			arrlen;			/* allocated size of arr */
-	WordEntry  *inarr;
 	int			len = 0;
 	TSVector	in;
 	int			i;
@@ -263,13 +262,36 @@ tsvectorin(PG_FUNCTION_ARGS)
 	in = (TSVector) palloc0(totallen);
 	SET_VARSIZE(in, totallen);
 	TS_SETCOUNT(in, len);
-	inarr = ARRPTR(in);
 	strbuf = STRPTR(in);
 	stroff = 0;
 	for (i = 0; i < len; i++)
 	{
+		WordEntry *entry = ARRPTR(in) + i;
+
 		stroff = SHORTALIGN(stroff);
 		memcpy(strbuf + stroff, &tmpbuf[arr[i].offset], arr[i].entry.len);
+
+		if (i % TS_OFFSET_STRIDE == 0)
+		{
+			/* WordEntry with offset */
+			WordEntry offentry;
+			entry->hasoff = 1;
+			entry->offset = stroff;
+
+			/* fill WordEntry for offset */
+			offentry.hasoff = 0;
+			offentry.len = arr[i].entry.len;
+			offentry.npos = arr[i].entry.npos;
+			memcpy(strbuf + stroff, &offentry, sizeof(WordEntry));
+			stroff += sizeof(WordEntry);
+		}
+		else
+		{
+			entry->hasoff = 0;
+			entry->len = arr[i].entry.len;
+			entry->npos = arr[i].entry.npos;
+		}
+
 		stroff += arr[i].entry.len;
 		if (arr[i].entry.npos)
 		{
@@ -284,11 +306,9 @@ tsvectorin(PG_FUNCTION_ARGS)
 
 			pfree(arr[i].pos);
 		}
-		inarr[i] = arr[i].entry;
 	}
 
 	Assert((strbuf + stroff - (char *) in) == totallen);
-
 	PG_RETURN_TSVECTOR(in);
 }
 
@@ -299,7 +319,7 @@ tsvectorout(PG_FUNCTION_ARGS)
 	char	   *outbuf;
 	int32		i,
 				lenbuf = 0,
-				pos = 0,
+				offset = 0,
 				pp,
 				tscount = TS_COUNT(out);
 	WordEntry  *ptr = ARRPTR(out);
@@ -318,7 +338,7 @@ tsvectorout(PG_FUNCTION_ARGS)
 	curout = outbuf = (char *) palloc(lenbuf);
 	for (i = 0; i < tscount; i++)
 	{
-		curbegin = curin = STRPTR(out) + pos;
+		curbegin = curin = STRPTR(out) + offset;
 		if (i != 0)
 			*curout++ = ' ';
 		*curout++ = '\'';
@@ -367,7 +387,8 @@ tsvectorout(PG_FUNCTION_ARGS)
 				wptr++;
 			}
 		}
-		IncrPtr(ptr, pos);
+
+		IncrPtr(out, ptr, offset);
 	}
 
 	*curout = '\0';

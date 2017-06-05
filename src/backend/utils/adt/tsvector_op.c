@@ -33,7 +33,7 @@
 
 typedef struct
 {
-	TSVectorExpanded	vec;
+	TSVector			vec;
 	int					bidx;
 	int					eidx;
 	char			   *operand;
@@ -68,7 +68,7 @@ typedef struct
 #define STATHDRSIZE (offsetof(TSVectorStat, data))
 
 static Datum tsvector_update_trigger(PG_FUNCTION_ARGS, bool config_column);
-static int	tsvector_bsearch(const TSVectorExpanded vec, char *lexeme,
+static int	tsvector_bsearch(const TSVector vec, char *lexeme,
 							 int lexeme_len);
 
 /*
@@ -91,35 +91,38 @@ silly_cmp_tsvector(const TSVector a, const TSVector b)
 		WordEntry  *bptr = ARRPTR(b);
 		int			i = 0;
 		int			res,
-					pos1 = 0,
-					pos2 = 0;
+					offset1 = 0,
+					offset2 = 0;
 
 
 		for (i = 0; i < TS_COUNT(a); i++)
 		{
-			char *lex1, *lex2;
-			lex1 = STRPTR(a) + pos1;
-			lex2 = STRPTR(b) + pos2;
+			char   *lex1 = STRPTR(a) + offset1,
+				   *lex2 = STRPTR(b) + offset2;
+			int		npos1 = ENTRY_NPOS(a, aptr),
+					npos2 = ENTRY_NPOS(b, bptr);
+			int		len1 = ENTRY_LEN(a, aptr),
+					len2 = ENTRY_LEN(b, bptr);
 
-			if ((aptr->npos == 0 || bptr->npos == 0) && aptr->npos != bptr->npos)
-				return aptr->npos > bptr->npos? -1 : 1;
-			else if ((res = tsCompareString(lex1, aptr->len, lex2, bptr->len, false)) != 0)
+			if ((npos1 == 0 || npos2 == 0) && npos1 != npos2)
+				return npos1 > npos2? -1 : 1;
+			else if ((res = tsCompareString(lex1, len1, lex2, len2, false)) != 0)
 			{
 				return res;
 			}
-			else if (aptr->npos > 0)
+			else if (npos1 > 0)
 			{
 				WordEntryPos *ap,
 							 *bp;
 				int			j;
 
-				ap = POSDATAPTR(lex1, aptr->len);
-				bp = POSDATAPTR(lex2, bptr->len);
+				ap = POSDATAPTR(aptr, offset1);
+				bp = POSDATAPTR(bptr, offset2);
 
-				if (aptr->npos != bptr->npos)
-					return (aptr->npos > bptr->npos) ? -1 : 1;
+				if (npos1 != npos2)
+					return (npos1 > npos2) ? -1 : 1;
 
-				for (j = 0; j < aptr->npos; j++)
+				for (j = 0; j < npos1, j++)
 				{
 					if (WEP_GETPOS(*ap) != WEP_GETPOS(*bp))
 					{
@@ -133,8 +136,8 @@ silly_cmp_tsvector(const TSVector a, const TSVector b)
 				}
 			}
 
-			IncrPtr(aptr, pos1);
-			IncrPtr(bptr, pos2);
+			IncrPtr(a, aptr, offset1);
+			IncrPtr(b, bptr, offset2);
 		}
 	}
 
@@ -276,8 +279,8 @@ tsvector_setweight(PG_FUNCTION_ARGS)
 Datum
 tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 {
-	TSVector			tsout = PG_GETARG_TSVECTOR_COPY(0);
-	TSVectorExpanded	vec = PG_GETARG_EXPANDED_TSVECTOR(0);
+	TSVector			tsout = PG_GETARG_TSVECTOR_COPY(0),
+						tsin = PG_GETARG_TSVECTOR(0);
 	char				char_weight = PG_GETARG_CHAR(1);
 	ArrayType		   *lexemes = PG_GETARG_ARRAYTYPE_P(2);
 
@@ -332,21 +335,21 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 
 		lex = VARDATA(dlexemes[i]);
 		lex_len = VARSIZE(dlexemes[i]) - VARHDRSZ;
-		lex_pos = tsvector_bsearch(vec, lex, lex_len);
+		lex_pos = tsvector_bsearch(tsin, lex, lex_len);
 		entry = ARRPTR(tsout) + lex_pos;
 
 		if (lex_pos >= 0 && entry->npos > 0)
 		{
 			int				j;
-			int				pos = tsvector_getposition(vec, lex_pos);
-			WordEntryPos   *p = POSDATAPTR(STRPTR(tsout) + pos, entry->len);
+			int				offset = tsvector_getoffset(tsin, lex_pos, NULL);
+			WordEntryPos   *p = POSDATAPTR(entry, offset);
 
-			for (j = 0; j < entry->npos; j++)
+			for (j = 0; j < ENTRY_NPOS(tsin, entry); j++)
 				WEP_SETWEIGHT(p[j], weight);
 		}
 	}
 
-	/* TODO: free expanded object */
+	PG_FREE_IF_COPY(tsin, 0);
 	PG_FREE_IF_COPY(lexemes, 2);
 	PG_RETURN_POINTER(tsout);
 }
@@ -357,42 +360,12 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 					false)
 
 /*
- * Add positions from src to dest after offsetting them by maxpos.
- * Return the number added (might be less than expected due to overflow)
- */
-static int32
-add_pos(char *src, WordEntry *srcptr,
-		WordEntryPos *dest, WordEntry *destptr,
-		int32 maxpos)
-{
-	uint16	    clen = destptr->npos;
-	int			i;
-	uint16		slen = srcptr->npos,
-				startlen;
-	WordEntryPos *spos = POSDATAPTR(src, srcptr->len);
-
-	startlen = clen;
-	for (i = 0;
-		 i < slen && clen < MAXNUMPOS &&
-		 (clen == 0 || WEP_GETPOS(dest[clen - 1]) != MAXENTRYPOS - 1);
-		 i++)
-	{
-		WEP_SETWEIGHT(dest[clen], WEP_GETWEIGHT(spos[i]));
-		WEP_SETPOS(dest[clen], LIMITPOS(WEP_GETPOS(spos[i]) + maxpos));
-		clen++;
-	}
-
-	destptr->npos = clen;
-	return clen - startlen;
-}
-
-/*
  * Perform binary search of given lexeme in TSVector.
  * Returns lexeme position in TSVector's entry array or -1 if lexeme wasn't
  * found.
  */
 static int
-tsvector_bsearch(const TSVectorExpanded vec, char *lexeme, int lexeme_len)
+tsvector_bsearch(const TSVector vec, char *lexeme, int lexeme_len)
 {
 	int			StopLow = 0,
 				StopHigh = vec->count,
@@ -407,7 +380,7 @@ tsvector_bsearch(const TSVectorExpanded vec, char *lexeme, int lexeme_len)
 		StopMiddle = (StopLow + StopHigh) / 2;
 		str = tsvector_getlexeme(vec, StopMiddle, &entry);
 		cmp = tsCompareString(lexeme, lexeme_len,
-							  str, entry->len, false);
+							  str, ENTRY_LEN(vec, entry), false);
 
 		if (cmp < 0)
 			StopHigh = StopMiddle;
@@ -939,229 +912,8 @@ next:
 Datum
 tsvector_concat(PG_FUNCTION_ARGS)
 {
-	TSVector	in1 = PG_GETARG_TSVECTOR(0);
-	TSVector	in2 = PG_GETARG_TSVECTOR(1);
-	TSVector	out;
-	WordEntry  *ptr;
-	WordEntry  *ptr1,
-			   *ptr2;
-	int			maxpos = 0,
-				pos1 = 0,
-				pos2 = 0,
-				i,
-				j,
-				i1,
-				i2,
-				dataoff,
-				output_bytes,
-				output_size;
-	char	   *data,
-			   *data1,
-			   *data2;
-
-	/* Get max position in in1; we'll need this to offset in2's positions */
-	ptr = ARRPTR(in1);
-	i = TS_COUNT(in1);
-	while (i--)
-	{
-		if ((j = ptr->npos) != 0)
-		{
-			WordEntryPos *p = POSDATAPTR(STRPTR(in1) + pos1, ptr->len);
-			while (j--)
-			{
-				if (WEP_GETPOS(*p) > maxpos)
-					maxpos = WEP_GETPOS(*p);
-				p++;
-			}
-		}
-		IncrPtr(ptr, pos1);
-	}
-
-	ptr1 = ARRPTR(in1);
-	ptr2 = ARRPTR(in2);
-	data1 = STRPTR(in1);
-	data2 = STRPTR(in2);
-	i1 = TS_COUNT(in1);
-	i2 = TS_COUNT(in2);
-	pos1 = 0;
-	pos2 = 0;
-
-	/*
-	 * Conservative estimate of space needed.  We might need all the data in
-	 * both inputs, and conceivably add a pad byte before position data for
-	 * each item where there was none before.
-	 */
-	output_bytes = VARSIZE(in1) + VARSIZE(in2) + i1 + i2;
-
-	out = (TSVector) palloc0(output_bytes);
-	SET_VARSIZE(out, output_bytes);
-
-	/*
-	 * We must make out->size valid so that STRPTR(out) is sensible.  We'll
-	 * collapse out any unused space at the end.
-	 */
-	TS_SETCOUNT(out, i1 + i2);
-
-	ptr = ARRPTR(out);
-	data = STRPTR(out);
-	dataoff = 0;
-	while (i1 && i2)
-	{
-		int cmp = tsCompareString(data1 + pos1, ptr1->len,
-									data2 + pos2, ptr2->len, false);
-
-		if (cmp < 0)
-		{						/* in1 first */
-			ptr->npos = ptr1->npos;
-			ptr->len = ptr1->len;
-			dataoff = SHORTALIGN(dataoff);
-			memcpy(data + dataoff, data1 + pos1, ptr1->len);
-			dataoff += ptr1->len;
-			if (ptr->npos)
-			{
-				WordEntryPos *pos = POSDATAPTR(data1 + pos1, ptr1->len);
-				dataoff = SHORTALIGN(dataoff);
-				memcpy(data + dataoff, pos, ptr1->npos * sizeof(WordEntryPos));
-				dataoff += ptr1->npos * sizeof(WordEntryPos);
-			}
-
-			ptr++;
-			IncrPtr(ptr1, pos1);
-			i1--;
-		}
-		else if (cmp > 0)
-		{						/* in2 first */
-			ptr->npos = 0;
-			ptr->len = ptr2->len;
-			dataoff = SHORTALIGN(dataoff);
-			memcpy(data + dataoff, data2 + pos2, ptr2->len);
-			dataoff += ptr2->len;
-			if (ptr2->npos)
-			{
-				int addlen = add_pos(data2 + pos2, ptr2,
-					(WordEntryPos *)(data + SHORTALIGN(dataoff)), ptr, maxpos);
-
-				if (addlen > 0)
-				{
-					dataoff = SHORTALIGN(dataoff);
-					dataoff += addlen * sizeof(WordEntryPos);
-				}
-			}
-
-			ptr++;
-			IncrPtr(ptr2, pos2);
-			i2--;
-		}
-		else
-		{
-			ptr->len = ptr1->len;
-			ptr->npos = 0;
-			dataoff = SHORTALIGN(dataoff);
-			memcpy(data + dataoff, data1 + pos1, ptr1->len);
-			dataoff += ptr1->len;
-			if (ptr1->npos || ptr2->npos)
-			{
-				if (ptr1->npos)
-				{
-					WordEntryPos *pos = POSDATAPTR(data1 + pos1, ptr1->len);
-					dataoff = SHORTALIGN(dataoff);
-					memcpy(data + dataoff, pos, ptr1->npos * sizeof(WordEntryPos));
-					ptr->npos = ptr1->npos;
-
-					if (ptr2->npos)
-						add_pos(data2 + pos2, ptr2,
-							(WordEntryPos *)(data + dataoff), ptr, maxpos);
-
-					dataoff += ptr->npos * sizeof(WordEntryPos);
-				}
-				else	/* must have ptr2->npos > 0 */
-				{
-					int addlen = add_pos(data2 + pos2, ptr2,
-						(WordEntryPos *)(data + SHORTALIGN(dataoff)), ptr, maxpos);
-
-					if (addlen > 0)
-					{
-						dataoff = SHORTALIGN(dataoff);
-						dataoff += addlen * sizeof(WordEntryPos);
-					}
-				}
-			}
-
-			ptr++;
-			IncrPtr(ptr1, pos1);
-			IncrPtr(ptr2, pos2);
-			i1--;
-			i2--;
-		}
-	}
-
-	while (i1--)
-	{
-		ptr->npos = ptr1->npos;
-		ptr->len = ptr1->len;
-		dataoff = SHORTALIGN(dataoff);
-		memcpy(data + dataoff, data1 + pos1, ptr1->len);
-		dataoff += ptr1->len;
-		if (ptr->npos)
-		{
-			WordEntryPos *pos = POSDATAPTR(data1 + pos1, ptr1->len);
-			dataoff = SHORTALIGN(dataoff);
-			memcpy(data + dataoff, pos, ptr1->npos * sizeof(WordEntryPos));
-			dataoff += ptr1->npos * sizeof(WordEntryPos);
-		}
-
-		ptr++;
-		IncrPtr(ptr1, pos1);
-	}
-
-	while (i2--)
-	{
-		ptr->npos = 0;
-		ptr->len = ptr2->len;
-		dataoff = SHORTALIGN(dataoff);
-		memcpy(data + dataoff, data2 + pos2, ptr2->len);
-		dataoff += ptr2->len;
-		if (ptr2->npos)
-		{
-			int addlen = add_pos(data2 + pos2, ptr2,
-				(WordEntryPos *)(data + SHORTALIGN(dataoff)), ptr, maxpos);
-
-			if (addlen > 0)
-			{
-				dataoff = SHORTALIGN(dataoff);
-				dataoff += addlen * sizeof(WordEntryPos);
-			}
-		}
-
-		ptr++;
-		IncrPtr(ptr2, pos2);
-	}
-
-	/*
-	 * Instead of checking each offset individually, we check for overflow of
-	 * pos fields once at the end.
-	 */
-	if (dataoff > MAXSTRPOS)
-		ereport(ERROR,
-				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-				 errmsg("string is too long for tsvector (%d bytes, max %d bytes)", dataoff, MAXSTRPOS)));
-
-	/*
-	 * Adjust sizes (asserting that we didn't overrun the original estimates)
-	 * and collapse out any unused array entries.
-	 */
-	output_size = ptr - ARRPTR(out);
-	Assert(output_size <= TS_COUNT(out));
-	TS_SETCOUNT(out, output_size);
-	if (data != STRPTR(out))
-		memmove(STRPTR(out), data, dataoff);
-	output_bytes = CALCDATASIZE(output_size, dataoff);
-	Assert(output_bytes <= VARSIZE(out));
-	SET_VARSIZE(out, output_bytes);
-
-	PG_FREE_IF_COPY(in1, 0);
-	PG_FREE_IF_COPY(in2, 1);
-	PG_RETURN_POINTER(out);
+	TSVector	in1 = PG_GETARG_TSVECTOR_COPY(0);
+	PG_RETURN_POINTER(in1);
 }
 
 /*
