@@ -1566,21 +1566,21 @@ ts_match_qv(PG_FUNCTION_ARGS)
 Datum
 ts_match_vq(PG_FUNCTION_ARGS)
 {
-	TSVectorExpanded	val = PG_GETARG_EXPANDED_TSVECTOR(0);
-	TSQuery				query = PG_GETARG_TSQUERY(1);
-	CHKVAL				chkval;
-	bool				result;
+	TSVector	val = PG_GETARG_TSVECTOR(0);
+	TSQuery		query = PG_GETARG_TSQUERY(1);
+	CHKVAL		chkval;
+	bool		result;
 
 	/* empty query matches nothing */
 	if (!query->size)
 	{
-		/* TODO: free expanded right way */
+		PG_FREE_IF_COPY(val, 0);
 		PG_FREE_IF_COPY(query, 1);
 		PG_RETURN_BOOL(false);
 	}
 
 	chkval.bidx = 0;
-	chkval.eidx = val->count;
+	chkval.eidx = TS_COUNT(val);
 	chkval.vec = val;
 	chkval.operand = GETOPERAND(query);
 	result = TS_execute(GETQUERY(query),
@@ -1588,7 +1588,7 @@ ts_match_vq(PG_FUNCTION_ARGS)
 						TS_EXEC_CALC_NOT,
 						checkcondition_str);
 
-	/* TODO: free expanded right way */
+	PG_FREE_IF_COPY(val, 0);
 	PG_FREE_IF_COPY(query, 1);
 	PG_RETURN_BOOL(result);
 }
@@ -1665,8 +1665,7 @@ check_weight(char *lexeme, WordEntry *wptr, int8 weight)
 					t, (e)->len, false)
 
 static void
-insertStatEntry(MemoryContext persistentContext, TSVectorStat *stat,
-	TSVectorExpanded txt, uint32 off)
+insertStatEntry(MemoryContext persistentContext, TSVectorStat *stat, TSVector txt, uint32 off)
 {
 	WordEntry  *we;
 	StatEntry  *node = stat->root,
@@ -1735,17 +1734,18 @@ insertStatEntry(MemoryContext persistentContext, TSVectorStat *stat,
 }
 
 static void
-chooseNextStatEntry(MemoryContext persistentContext, TSVectorStat *stat,
-					TSVectorExpanded txt, uint32 low, uint32 high, uint32 offset)
+chooseNextStatEntry(MemoryContext persistentContext, TSVectorStat *stat, TSVector txt,
+					uint32 low, uint32 high, uint32 offset)
 {
 	uint32		pos;
-	uint32		middle = (low + high) >> 1;
+	uint32		middle = (low + high) >> 1,
+				count = TS_COUNT(txt);
 
 	pos = (low + middle) >> 1;
-	if (low != middle && pos >= offset && pos - offset < txt->count)
+	if (low != middle && pos >= offset && pos - offset < count)
 		insertStatEntry(persistentContext, stat, txt, pos - offset);
 	pos = (high + middle + 1) >> 1;
-	if (middle + 1 != high && pos >= offset && pos - offset < txt->count)
+	if (middle + 1 != high && pos >= offset && pos - offset < count)
 		insertStatEntry(persistentContext, stat, txt, pos - offset);
 
 	if (low != middle)
@@ -1769,10 +1769,11 @@ chooseNextStatEntry(MemoryContext persistentContext, TSVectorStat *stat,
 static TSVectorStat *
 ts_accum(MemoryContext persistentContext, TSVectorStat *stat, Datum data)
 {
-	TSVectorExpanded	txt = DatumGetExpandedTSVector(data);
-	uint32				i,
-						nbit = 0,
-						offset;
+	TSVector	txt = DatumGetTSVector(data);
+	uint32		i,
+				nbit = 0,
+				offset,
+				count = TS_COUNT(txt);
 
 	if (stat == NULL)
 	{							/* Init in first */
@@ -1781,18 +1782,19 @@ ts_accum(MemoryContext persistentContext, TSVectorStat *stat, Datum data)
 	}
 
 	/* simple check of correctness */
-	if (txt == NULL || txt->count == 0)
+	if (txt == NULL || count == 0)
 	{
-		/* TODO: free tsvector memory */
+		if (txt && txt != (TSVector) DatumGetPointer(data))
+			pfree(txt);
 		return stat;
 	}
 
-	i = txt->count - 1;
+	i = count - 1;
 	for (; i > 0; i >>= 1)
 		nbit++;
 
 	nbit = 1 << nbit;
-	offset = (nbit - txt->count) / 2;
+	offset = (nbit - count) / 2;
 
 	insertStatEntry(persistentContext, stat, txt, (nbit >> 1) - offset);
 	chooseNextStatEntry(persistentContext, stat, txt, 0, nbit, offset);
