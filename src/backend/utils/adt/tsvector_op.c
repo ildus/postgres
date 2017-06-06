@@ -117,8 +117,8 @@ silly_cmp_tsvector(const TSVector a, const TSVector b)
 							 *bp;
 				int			j;
 
-				ap = POSDATAPTR(aptr, pos1);
-				bp = POSDATAPTR(bptr, pos2);
+				ap = POSDATAPTR(lex1, len1);
+				bp = POSDATAPTR(lex2, len2);
 
 				if (npos1 != npos2)
 					return (npos1 > npos2) ? -1 : 1;
@@ -664,10 +664,10 @@ tsvector_addlexeme(TSVector tsv, int idx, uint32 *dataoff,
 
 	if (idx % TS_OFFSET_STRIDE == 0)
 	{
-		stroff = TYPEALIGN(sizeof(WordEntry), stroff);
-
 		/* WordEntry with offset */
 		WordEntry offentry;
+
+		stroff = TYPEALIGN(sizeof(WordEntry), stroff);
 		entry->hasoff = 1;
 		entry->offset = stroff;
 

@@ -335,7 +335,7 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 			if (entry->npos_)
 			{
 				dimt = entry->npos_;
-				post = POSDATAPTR(entry, lexeme);
+				post = POSDATAPTR(lexeme, entry->len_);
 			}
 			else
 			{
