@@ -73,19 +73,20 @@ gin_extract_tsvector(PG_FUNCTION_ARGS)
 	if (tscount > 0)
 	{
 		int			i;
-		uint32		offset = 0;
+		uint32		pos;
 
 		WordEntry  *we = ARRPTR(vector);
 		entries = (Datum *) palloc(sizeof(Datum) * tscount);
 
+		InitPos(pos);
 		for (i = 0; i < tscount; i++)
 		{
 			text	   *txt;
 
-			txt = cstring_to_text_with_len(STRPTR(vector) + offset,
+			txt = cstring_to_text_with_len(STRPTR(vector) + pos,
 				ENTRY_LEN(vector, we));
 			entries[i] = PointerGetDatum(txt);
-			IncrPtr(vector, we, offset);
+			IncrPtr(vector, we, pos);
 		}
 	}
 

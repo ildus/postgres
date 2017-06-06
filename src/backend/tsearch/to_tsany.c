@@ -154,23 +154,16 @@ TSVector
 make_tsvector(ParsedText *prs)
 {
 	int			i,
-				j,
 				lenstr = 0,
 				totallen;
 	TSVector	in;
-	WordEntry  *ptr;
-	char	   *str;
-	int			stroff;
+	uint32		stroff;
 
 	prs->curwords = uniqueWORD(prs->words, prs->curwords);
 	for (i = 0; i < prs->curwords; i++)
 	{
-		lenstr += SHORTALIGN(prs->words[i].len);
-		if (prs->words[i].alen)
-		{
-			lenstr = SHORTALIGN(lenstr);
-			lenstr += prs->words[i].pos.apos[0] * sizeof(WordEntryPos);
-		}
+		int npos = prs->words[i].alen ? prs->words[i].pos.apos[0] : 0;
+		INCRSIZE(lenstr, i, prs->words[i].len, npos);
 	}
 
 	if (lenstr > MAXSTRPOS)
@@ -183,8 +176,6 @@ make_tsvector(ParsedText *prs)
 	SET_VARSIZE(in, totallen);
 	TS_SETCOUNT(in, prs->curwords);
 
-	ptr = ARRPTR(in);
-	str = STRPTR(in);
 	stroff = 0;
 	for (i = 0; i < prs->curwords; i++)
 	{
@@ -192,47 +183,13 @@ make_tsvector(ParsedText *prs)
 		if (prs->words[i].alen)
 			npos = prs->words[i].pos.apos[0];
 
-		if (npos > 0xFFFF)
-			elog(ERROR, "positions array too long");
+		tsvector_addlexeme(in, i, &stroff, prs->words[i].word, prs->words[i].len,
+			prs->words[i].pos.apos + 1, npos);
 
-		stroff = SHORTALIGN(stroff);
-		if (i % TS_OFFSET_STRIDE == 0)
-		{
-			WordEntry ptr_off;
-			ptr->hasoff = 1;
-			ptr->offset = stroff;
-
-			ptr_off.hasoff = 0;
-			ptr_off.len = prs->words[i].len;
-			ptr_off.npos = npos;
-			memcpy(str + stroff, &ptr_off, sizeof(WordEntry));
-			stroff += sizeof(WordEntry);
-		}
-		else
-		{
-			ptr->len = prs->words[i].len;
-			ptr->npos = npos;
-		}
-
-		memcpy(str + stroff, prs->words[i].word, prs->words[i].len);
-		stroff += prs->words[i].len;
 		pfree(prs->words[i].word);
 		if (prs->words[i].alen)
-		{
-			WordEntryPos *wptr;
-
-			stroff = SHORTALIGN(stroff);
-			wptr = (WordEntryPos *) (str + stroff);
-			for (j = 0; j < npos; j++)
-			{
-				WEP_SETWEIGHT(wptr[j], 0);
-				WEP_SETPOS(wptr[j], prs->words[i].pos.apos[j + 1]);
-			}
-			stroff += npos * sizeof(WordEntryPos);
 			pfree(prs->words[i].pos.apos);
-		}
 
-		ptr++;
 	}
 	pfree(prs->words);
 	return in;

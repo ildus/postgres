@@ -41,14 +41,16 @@
 
 #define TS_OFFSET_STRIDE 4
 
-typedef struct
+typedef union
 {
-	union {
-		uint32 hasoff_: 1,
-			   offset: 31;
+	struct {
 		uint32 hasoff: 1,
-			   len:11,
-			   npos: 16,
+			   offset: 31;
+	};
+	struct {
+		uint32 hasoff_: 1,
+			   len_:11,
+			   npos_: 16,
 			   _unused: 4;
 	};
 } WordEntry;
@@ -121,11 +123,14 @@ typedef TSVectorData *TSVector;
  * helpers used when we're not sure that WordEntry
  * contains properties not offset
  */
-#define ENTRY_NPOS(x,we) (UNWRAP_ENTRY(x,we)->npos)
-#define ENTRY_LEN(x,we) (UNWRAP_ENTRY(x,we)->len)
+#define ENTRY_NPOS(x,we) (UNWRAP_ENTRY(x,we)->npos_)
+#define ENTRY_LEN(x,we) (UNWRAP_ENTRY(x,we)->len_)
 
 /* pointer to start of positions */
 #define POSDATAPTR(lex, len) ((WordEntryPos *) (lex + SHORTALIGN(len)))
+
+/* default offset in tsvector data */
+#define InitPos(p) ((p) = sizeof(WordEntry))
 
 /* increment entry and offset by given WordEntry */
 #define IncrPtr(x,w,p) \
@@ -136,9 +141,31 @@ do { \
 		y = (WordEntry *) (STRPTR(x) + (w)->offset);	\
 		(p) = (w)->offset + sizeof(WordEntry);			\
 	}													\
-	Assert(!y->hasoff);									\
-	(p) += SHORTALIGN(y->len) + y->npos * sizeof(WordEntryPos); \
 	(w)++;												\
+	Assert(!y->hasoff);									\
+	(p) += SHORTALIGN(y->len_) + y->npos_ * sizeof(WordEntryPos); \
+	if ((w) - ARRPTR(x) < TS_COUNT(x) && w->hasoff)		\
+	{													\
+		(p) = TYPEALIGN(sizeof(WordEntry), (p));		\
+		(p) += sizeof(WordEntry);						\
+	}													\
+} while (0);
+
+/* used to calculate tsvector size in in tsvector constructors */
+#define INCRSIZE(s,i,l,n) /* size,index,len,npos */			\
+do {														\
+	(s) = SHORTALIGN(s);									\
+	if ((i) % TS_OFFSET_STRIDE == 0)						\
+	{														\
+		(s) = TYPEALIGN(sizeof(WordEntry), (s));			\
+		(s) += sizeof(WordEntry);							\
+	}														\
+	(s) += (l);												\
+	if (n)													\
+	{														\
+		(s) = SHORTALIGN(s);								\
+		(s) += (n) * sizeof(WordEntryPos);					\
+	}														\
 } while (0);
 
 /*
@@ -168,7 +195,7 @@ tsvector_getoffset(TSVector vec, int idx, WordEntry **we)
 
 	while (!entry->hasoff)
 	{
-		offset += SHORTALIGN(entry->len) + entry->npos * sizeof(WordEntryPos);
+		offset += SHORTALIGN(entry->len_) + entry->npos_ * sizeof(WordEntryPos);
 		entry--;
 	}
 
@@ -178,7 +205,7 @@ tsvector_getoffset(TSVector vec, int idx, WordEntry **we)
 	if (idx % TS_OFFSET_STRIDE)
 	{
 		WordEntry *offset_entry = (WordEntry *) (STRPTR(vec) + entry->offset);
-		offset += SHORTALIGN(offset_entry->len) + offset_entry->npos * sizeof(WordEntryPos);
+		offset += SHORTALIGN(offset_entry->len_) + offset_entry->npos_ * sizeof(WordEntryPos);
 	} else
 	{
 		if (we)

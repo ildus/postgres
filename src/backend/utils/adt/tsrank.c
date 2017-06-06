@@ -59,7 +59,8 @@ cnt_length(TSVector t)
 	for (i = 0; i < TS_COUNT(t); i++)
 	{
 		WordEntry *entry = UNWRAP_ENTRY(t, ARRPTR(t) + i);
-		len += (entry->npos == 0) ? 1 : entry->npos;
+		Assert(!entry->hasoff);
+		len += (entry->npos_ == 0) ? 1 : entry->npos_;
 	}
 
 	return len;
@@ -94,7 +95,7 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 		lexeme = tsvector_getlexeme(t, StopMiddle, &we);
 
 		Assert(!we->hasoff);
-		difference = WordECompareQueryItem(lexeme, we->len,
+		difference = WordECompareQueryItem(lexeme, we->len_,
 			GETOPERAND(q), item, false);
 
 		if (difference == 0)
@@ -121,7 +122,7 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 			lexeme = tsvector_getlexeme(t, StopMiddle, &we);
 
 			Assert(!we->hasoff);
-			if (WordECompareQueryItem(lexeme, we->len, GETOPERAND(q), item, true) != 0)
+			if (WordECompareQueryItem(lexeme, we->len_, GETOPERAND(q), item, true) != 0)
 				break;
 
 			(*nitem)++;
@@ -249,10 +250,10 @@ calc_rank_and(const float *w, TSVector t, TSQuery q)
 			char *lexeme = tsvector_getlexeme(t, idx, &entry);
 
 			Assert(!entry->hasoff);
-			if (entry->npos)
+			if (entry->npos_)
 			{
-				pos[i] = POSDATAPTR(lexeme, entry->len);
-				npos[i] = entry->npos;
+				pos[i] = POSDATAPTR(lexeme, entry->len_);
+				npos[i] = entry->npos_;
 			}
 			else
 			{
@@ -331,9 +332,9 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 			char *lexeme = tsvector_getlexeme(t, idx, &entry);
 
 			Assert(!entry->hasoff);
-			if (entry->npos)
+			if (entry->npos_)
 			{
-				dimt = entry->npos;
+				dimt = entry->npos_;
 				post = POSDATAPTR(entry, lexeme);
 			}
 			else
@@ -781,10 +782,10 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 			char		*lex = tsvector_getlexeme(txt, idx, &entry);
 
 			Assert(!entry->hasoff);
-			if (entry->npos)
+			if (entry->npos_)
 			{
-				dimt = entry->npos;
-				post = POSDATAPTR(lex, entry->len);
+				dimt = entry->npos_;
+				post = POSDATAPTR(lex, entry->len_);
 			}
 			else
 			{

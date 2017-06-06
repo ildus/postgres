@@ -188,12 +188,12 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 	{							/* tsvector */
 		SignTSVector *res;
 		TSVector	val = DatumGetTSVector(entry->key);
-		int32		len,
-					pos = 0;
+		int32		len;
 		int32	   *arr;
 		WordEntry  *ptr = ARRPTR(val);
 		char	   *words = STRPTR(val);
 		const int	tscount = TS_COUNT(val);
+		uint32		pos;
 
 		len = CALCGTSIZE(ARRKEY, tscount);
 		res = (SignTSVector *) palloc(len);
@@ -201,6 +201,8 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 		res->flag = ARRKEY;
 		arr = GETARR(res);
 		len = tscount;
+
+		InitPos(pos);
 		while (len--)
 		{
 			pg_crc32	c;

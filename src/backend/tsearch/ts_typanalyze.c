@@ -203,7 +203,7 @@ compute_tsvector_stats(VacAttrStats *stats,
 		WordEntry  *curentryptr;
 		char	   *lexemesptr;
 		int			j,
-					offset = 0;
+					pos;
 
 		vacuum_delay_point();
 
@@ -239,12 +239,14 @@ compute_tsvector_stats(VacAttrStats *stats,
 		 */
 		lexemesptr = STRPTR(vector);
 		curentryptr = ARRPTR(vector);
+
+		InitPos(pos);
 		for (j = 0; j < TS_COUNT(vector); j++)
 		{
 			bool		found;
 
 			/* Construct a hash key */
-			hash_key.lexeme = lexemesptr + offset;
+			hash_key.lexeme = lexemesptr + pos;
 			hash_key.length = ENTRY_LEN(vector, curentryptr);
 
 			/* Lookup current lexeme in hashtable, adding it if new */
@@ -275,7 +277,7 @@ compute_tsvector_stats(VacAttrStats *stats,
 			}
 
 			/* Advance to the next WordEntry in the tsvector */
-			IncrPtr(vector, curentryptr, offset);
+			IncrPtr(vector, curentryptr, pos);
 		}
 	}
 
