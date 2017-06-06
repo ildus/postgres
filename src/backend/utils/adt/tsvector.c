@@ -139,7 +139,7 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 			buflen = SHORTALIGN(buflen);
 			if (i++ % TS_OFFSET_STRIDE == 0)
 			{
-				buflen = TYPEALIGN(sizeof(WordEntry), buflen);
+				buflen = INTALIGN(buflen);
 				buflen += sizeof(WordEntry);
 			}
 
@@ -181,7 +181,7 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 	/* count space needed for last item */
 	if (i % TS_OFFSET_STRIDE == 0)
 	{
-		buflen = TYPEALIGN(sizeof(WordEntry), buflen);
+		buflen = INTALIGN(buflen);
 		buflen += sizeof(WordEntry);
 	}
 	else

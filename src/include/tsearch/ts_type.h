@@ -145,27 +145,18 @@ do { \
 	Assert(!y->hasoff);									\
 	(p) += SHORTALIGN(y->len_) + y->npos_ * sizeof(WordEntryPos); \
 	if ((w) - ARRPTR(x) < TS_COUNT(x) && w->hasoff)		\
-	{													\
-		(p) = TYPEALIGN(sizeof(WordEntry), (p));		\
-		(p) += sizeof(WordEntry);						\
-	}													\
+		(p) = INTALIGN(p) + sizeof(WordEntry);			\
 } while (0);
 
 /* used to calculate tsvector size in in tsvector constructors */
-#define INCRSIZE(s,i,l,n) /* size,index,len,npos */			\
-do {														\
-	(s) = SHORTALIGN(s);									\
-	if ((i) % TS_OFFSET_STRIDE == 0)						\
-	{														\
-		(s) = TYPEALIGN(sizeof(WordEntry), (s));			\
-		(s) += sizeof(WordEntry);							\
-	}														\
-	(s) += (l);												\
-	if (n)													\
-	{														\
-		(s) = SHORTALIGN(s);								\
-		(s) += (n) * sizeof(WordEntryPos);					\
-	}														\
+#define INCRSIZE(s,i,l,n) /* size,index,len,npos */		\
+do {													\
+	if ((i) % TS_OFFSET_STRIDE == 0)					\
+		(s) = INTALIGN(s) + sizeof(WordEntry);			\
+	else												\
+		(s) = SHORTALIGN(s);							\
+	(s) += (l);											\
+	(s) = (n)? SHORTALIGN(s) + (n) * sizeof(WordEntryPos) : (s);	\
 } while (0);
 
 /*

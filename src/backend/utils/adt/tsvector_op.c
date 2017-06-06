@@ -667,7 +667,7 @@ tsvector_addlexeme(TSVector tsv, int idx, uint32 *dataoff,
 		/* WordEntry with offset */
 		WordEntry offentry;
 
-		stroff = TYPEALIGN(sizeof(WordEntry), stroff);
+		stroff = INTALIGN(stroff);
 		entry->hasoff = 1;
 		entry->offset = stroff;
 
