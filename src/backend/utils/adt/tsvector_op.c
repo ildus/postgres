@@ -340,10 +340,11 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 
 		if (lex_idx >= 0 && npos > 0)
 		{
-			int		j;
-			char   *lexeme = tsvector_getlexeme(tsin, lex_idx, NULL);
+			int			j;
+			WordEntry  *we;
+			char	   *lexeme = tsvector_getlexeme(tsin, lex_idx, &we);
 
-			WordEntryPos   *p = POSDATAPTR(lexeme, lex_len);
+			WordEntryPos   *p = POSDATAPTR(lexeme, we->len_);
 
 			for (j = 0; j < npos; j++)
 				WEP_SETWEIGHT(p[j], weight);
@@ -735,9 +736,9 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 	int			nitems,
 				i,
 				j,
-				tslen,
-				datalen = 0;
+				tslen;
 	uint32		cur = 0;
+	long		datalen = 0;
 
 	deconstruct_array(v, TEXTOID, -1, false, 'i', &dlexemes, &nulls, &nitems);
 
@@ -765,7 +766,10 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 
 	/* Calculate space needed for surviving lexemes. */
 	for (i = 0; i < nitems; i++)
-		datalen += SHORTALIGN(VARSIZE(dlexemes[i]) - VARHDRSZ);
+	{
+		int	lex_len = VARSIZE(dlexemes[i]) - VARHDRSZ;
+		INCRSIZE(datalen, i, lex_len, 0);
+	}
 	tslen = CALCDATASIZE(nitems, datalen);
 
 	/* Allocate and fill tsvector. */

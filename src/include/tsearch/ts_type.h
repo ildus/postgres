@@ -186,22 +186,28 @@ tsvector_getoffset(TSVector vec, int idx, WordEntry **we)
 
 	while (!entry->hasoff)
 	{
-		offset += SHORTALIGN(entry->len_) + entry->npos_ * sizeof(WordEntryPos);
 		entry--;
+		if (!entry->hasoff)
+			offset += SHORTALIGN(entry->len_) + entry->npos_ * sizeof(WordEntryPos);
 	}
 
 	Assert(entry >= ARRPTR(vec));
-	offset += entry->offset;
 
 	if (idx % TS_OFFSET_STRIDE)
 	{
+		/* if idx is by offset */
 		WordEntry *offset_entry = (WordEntry *) (STRPTR(vec) + entry->offset);
+
+		offset += entry->offset + sizeof(WordEntry);
 		offset += SHORTALIGN(offset_entry->len_) + offset_entry->npos_ * sizeof(WordEntryPos);
-	} else
+	}
+	else
 	{
+		Assert(entry == ARRPTR(vec) + idx);
+
 		if (we)
-			*we = (WordEntry *) (STRPTR(vec) + offset);
-		offset += sizeof(WordEntry);
+			*we = (WordEntry *) (STRPTR(vec) + entry->offset);
+		offset = entry->offset + sizeof(WordEntry);
 	}
 
 	return offset;
