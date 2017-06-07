@@ -342,7 +342,7 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 		{
 			int			j;
 			WordEntry  *we;
-			char	   *lexeme = tsvector_getlexeme(tsin, lex_idx, &we);
+			char	   *lexeme = tsvector_getlexeme(tsout, lex_idx, &we);
 
 			WordEntryPos   *p = POSDATAPTR(lexeme, we->len_);
 
@@ -383,7 +383,7 @@ tsvector_bsearch(const TSVector tsv, char *lexeme, int lexeme_len)
 		StopMiddle = (StopLow + StopHigh) / 2;
 		str = tsvector_getlexeme(tsv, StopMiddle, &entry);
 		cmp = tsCompareString(lexeme, lexeme_len,
-							  str, ENTRY_LEN(tsv, entry), false);
+							  str, entry->len_, false);
 
 		if (cmp < 0)
 			StopHigh = StopMiddle;
