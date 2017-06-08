@@ -240,7 +240,7 @@ compute_tsvector_stats(VacAttrStats *stats,
 		lexemesptr = STRPTR(vector);
 		curentryptr = ARRPTR(vector);
 
-		InitPos(pos);
+		INITPOS(pos);
 		for (j = 0; j < TS_COUNT(vector); j++)
 		{
 			bool		found;
@@ -277,7 +277,7 @@ compute_tsvector_stats(VacAttrStats *stats,
 			}
 
 			/* Advance to the next WordEntry in the tsvector */
-			IncrPtr(vector, curentryptr, pos);
+			INCRPTR(vector, curentryptr, pos);
 		}
 	}
 

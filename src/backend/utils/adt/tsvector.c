@@ -329,7 +329,7 @@ tsvectorout(PG_FUNCTION_ARGS)
 
 	curout = outbuf = (char *) palloc(lenbuf);
 
-	InitPos(pos);
+	INITPOS(pos);
 	for (i = 0; i < tscount; i++)
 	{
 		int		lex_len = ENTRY_LEN(out, ptr),
@@ -385,7 +385,7 @@ tsvectorout(PG_FUNCTION_ARGS)
 			}
 		}
 
-		IncrPtr(out, ptr, pos);
+		INCRPTR(out, ptr, pos);
 	}
 
 	*curout = '\0';
@@ -419,7 +419,7 @@ tsvectorsend(PG_FUNCTION_ARGS)
 
 	pq_sendint(&buf, TS_COUNT(vec), sizeof(int32));
 
-	InitPos(pos);
+	INITPOS(pos);
 	for (i = 0; i < TS_COUNT(vec); i++)
 	{
 		char   *lexeme	= STRPTR(vec) + pos;
@@ -441,7 +441,7 @@ tsvectorsend(PG_FUNCTION_ARGS)
 			for (j = 0; j < npos; j++)
 				pq_sendint(&buf, wepptr[j], sizeof(WordEntryPos));
 		}
-		IncrPtr(vec, weptr, pos);
+		INCRPTR(vec, weptr, pos);
 	}
 
 	PG_FREE_IF_COPY(vec, 0);

@@ -121,7 +121,7 @@ typedef TSVectorData *TSVector;
 
 /*
  * helpers used when we're not sure that WordEntry
- * contains properties not offset
+ * contains ether offset or len
  */
 #define ENTRY_NPOS(x,we) (UNWRAP_ENTRY(x,we)->npos_)
 #define ENTRY_LEN(x,we) (UNWRAP_ENTRY(x,we)->len_)
@@ -129,11 +129,11 @@ typedef TSVectorData *TSVector;
 /* pointer to start of positions */
 #define POSDATAPTR(lex, len) ((WordEntryPos *) (lex + SHORTALIGN(len)))
 
-/* default offset in tsvector data */
-#define InitPos(p) ((p) = sizeof(WordEntry))
+/* set default offset in tsvector data */
+#define INITPOS(p) ((p) = sizeof(WordEntry))
 
 /* increment entry and offset by given WordEntry */
-#define IncrPtr(x,w,p) \
+#define INCRPTR(x,w,p) \
 do { \
 	WordEntry *y = (w);									\
 	if ((w)->hasoff)									\

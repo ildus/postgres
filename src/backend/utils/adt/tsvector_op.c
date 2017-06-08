@@ -93,8 +93,8 @@ silly_cmp_tsvector(const TSVector a, const TSVector b)
 		uint32		pos1,
 					pos2;
 
-		InitPos(pos1);
-		InitPos(pos2);
+		INITPOS(pos1);
+		INITPOS(pos2);
 
 		for (i = 0; i < TS_COUNT(a); i++)
 		{
@@ -137,8 +137,8 @@ silly_cmp_tsvector(const TSVector a, const TSVector b)
 				}
 			}
 
-			IncrPtr(a, aptr, pos1);
-			IncrPtr(b, bptr, pos2);
+			INCRPTR(a, aptr, pos1);
+			INCRPTR(b, bptr, pos2);
 		}
 	}
 
@@ -188,14 +188,14 @@ tsvector_strip(PG_FUNCTION_ARGS)
 	SET_VARSIZE(out, len);
 	TS_SETCOUNT(out, count);
 
-	InitPos(pos);
+	INITPOS(pos);
 	for (i = 0; i < count; i++)
 	{
-		char *lexeme = STRPTR(in) + pos;
-		tsvector_addlexeme(out, i, &posout, lexeme, ENTRY_LEN(in, entryin),
+		tsvector_addlexeme(out, i, &posout,
+				STRPTR(in) + pos, ENTRY_LEN(in, entryin),
 				NULL, 0);
 
-		IncrPtr(in, entryin, pos);
+		INCRPTR(in, entryin, pos);
 	}
 
 	PG_FREE_IF_COPY(in, 0);
@@ -250,7 +250,7 @@ tsvector_setweight(PG_FUNCTION_ARGS)
 	memcpy(out, in, VARSIZE(in));
 	weptr = ARRPTR(out);
 
-	InitPos(pos);
+	INITPOS(pos);
 	for (i = 0; i < TS_COUNT(out); i++)
 	{
 		int j,
@@ -262,7 +262,7 @@ tsvector_setweight(PG_FUNCTION_ARGS)
 			for (j = 0; j < npos; j++)
 				WEP_SETWEIGHT(p[j], w);
 		}
-		IncrPtr(out, weptr, pos);
+		INCRPTR(out, weptr, pos);
 	}
 
 	PG_FREE_IF_COPY(in, 0);
@@ -530,13 +530,12 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 {
 	FuncCallContext	   *funcctx;
 	TSVector			tsin;
-	int					offset;
+	uint32				pos;
 
 	if (SRF_IS_FIRSTCALL())
 	{
 		MemoryContext oldcontext;
 		TupleDesc	tupdesc;
-		uint32		pos;
 
 		funcctx = SRF_FIRSTCALL_INIT();
 		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
@@ -550,7 +549,7 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 						   TEXTARRAYOID, -1, 0);
 		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
-		InitPos(pos);
+		INITPOS(pos);
 		funcctx->user_fctx = list_make2(PG_GETARG_TSVECTOR(0), makeInteger(pos));
 
 		MemoryContextSwitchTo(oldcontext);
@@ -558,7 +557,7 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 
 	funcctx = SRF_PERCALL_SETUP();
 	tsin = (TSVector) linitial(funcctx->user_fctx);
-	offset = intVal(lsecond(funcctx->user_fctx));
+	pos = intVal(lsecond(funcctx->user_fctx));
 
 	if (funcctx->call_cntr < TS_COUNT(tsin))
 	{
@@ -572,12 +571,12 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 		Datum		values[3];
 
 		values[0] = PointerGetDatum(
-				  cstring_to_text_with_len(data + offset, lex_len)
+				  cstring_to_text_with_len(data + pos, lex_len)
 			);
 
 		if (npos)
 		{
-			WordEntryPos *pos = POSDATAPTR(data + offset, lex_len);
+			WordEntryPos *apos = POSDATAPTR(data + pos, lex_len);
 			Datum	   *positions;
 			Datum	   *weights;
 			char		weight;
@@ -591,8 +590,8 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 			weights = palloc(npos * sizeof(Datum));
 			for (j = 0; j < npos; j++)
 			{
-				positions[j] = Int16GetDatum(WEP_GETPOS(pos[j]));
-				weight = 'D' - WEP_GETWEIGHT(pos[j]);
+				positions[j] = Int16GetDatum(WEP_GETPOS(apos[j]));
+				weight = 'D' - WEP_GETWEIGHT(apos[j]);
 				weights[j] = PointerGetDatum(
 										 cstring_to_text_with_len(&weight, 1)
 					);
@@ -608,7 +607,7 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 			nulls[1] = nulls[2] = true;
 		}
 
-		IncrPtr(tsin, entry, intVal(lsecond(funcctx->user_fctx)));
+		INCRPTR(tsin, entry, intVal(lsecond(funcctx->user_fctx)));
 		tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
 		SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
 	}
@@ -634,13 +633,13 @@ tsvector_to_array(PG_FUNCTION_ARGS)
 
 	elements = palloc(TS_COUNT(tsin) * sizeof(Datum));
 
-	InitPos(pos);
+	INITPOS(pos);
 	for (i = 0; i < TS_COUNT(tsin); i++)
 	{
 		elements[i] = PointerGetDatum(
 		  cstring_to_text_with_len(STRPTR(tsin) + pos, ENTRY_LEN(tsin, entry))
 			);
-		IncrPtr(tsin, entry, pos);
+		INCRPTR(tsin, entry, pos);
 	}
 
 	array = construct_array(elements, TS_COUNT(tsin), TEXTOID, -1, false, 'i');

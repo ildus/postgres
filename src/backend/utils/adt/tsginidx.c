@@ -78,7 +78,7 @@ gin_extract_tsvector(PG_FUNCTION_ARGS)
 		WordEntry  *we = ARRPTR(vector);
 		entries = (Datum *) palloc(sizeof(Datum) * tscount);
 
-		InitPos(pos);
+		INITPOS(pos);
 		for (i = 0; i < tscount; i++)
 		{
 			text	   *txt;
@@ -86,7 +86,7 @@ gin_extract_tsvector(PG_FUNCTION_ARGS)
 			txt = cstring_to_text_with_len(STRPTR(vector) + pos,
 				ENTRY_LEN(vector, we));
 			entries[i] = PointerGetDatum(txt);
-			IncrPtr(vector, we, pos);
+			INCRPTR(vector, we, pos);
 		}
 	}
 

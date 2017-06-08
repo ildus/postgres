@@ -202,7 +202,7 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 		arr = GETARR(res);
 		len = tscount;
 
-		InitPos(pos);
+		INITPOS(pos);
 		while (len--)
 		{
 			pg_crc32	c;
@@ -214,7 +214,7 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 			*arr = *(int32 *) &c;
 			arr++;
 
-			IncrPtr(val, ptr, pos);
+			INCRPTR(val, ptr, pos);
 		}
 
 		len = uniqueint(GETARR(res), tscount);
