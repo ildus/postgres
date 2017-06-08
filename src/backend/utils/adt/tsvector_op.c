@@ -363,6 +363,34 @@ tsvector_setweight_by_filter(PG_FUNCTION_ARGS)
 					false)
 
 /*
+ * Add positions from src to dest after offsetting them by maxpos.
+ * Return the number added (might be less than expected due to overflow)
+ */
+static int32
+add_pos(char *src, WordEntry *srcptr,
+		WordEntryPos *dest, int from,
+		int32 maxpos)
+{
+	uint16	    clen = from;
+	int			i;
+	uint16		slen = srcptr->npos_;
+	WordEntryPos *spos = POSDATAPTR(src, srcptr->len_);
+
+	Assert(!srcptr->hasoff);
+	for (i = 0;
+		 i < slen && clen < MAXNUMPOS &&
+		 (clen == 0 || WEP_GETPOS(dest[clen - 1]) != MAXENTRYPOS - 1);
+		 i++)
+	{
+		WEP_SETWEIGHT(dest[clen], WEP_GETWEIGHT(spos[i]));
+		WEP_SETPOS(dest[clen], LIMITPOS(WEP_GETPOS(spos[i]) + maxpos));
+		clen++;
+	}
+
+	return clen - from;
+}
+
+/*
  * Perform binary search of given lexeme in TSVector.
  * Returns lexeme position in TSVector's entry array or -1 if lexeme wasn't
  * found.
@@ -437,7 +465,77 @@ static TSVector
 tsvector_delete_by_indices(TSVector tsv, int *indices_to_delete,
 						   int indices_count)
 {
-	TSVector	tsout = (TSVector) PG_DETOAST_DATUM_COPY(tsv);
+	TSVector	tsout;
+	WordEntry  *ptr = ARRPTR(tsv);
+	int			i,				/* index in input tsvector */
+				j,				/* index in output tsvector */
+				k;				/* index in indices_to_delete */
+	uint32		curoff = 0,			/* index in data area of output */
+				pos;
+
+	/*
+	 * Sort the filter array to simplify membership checks below.  Also, get
+	 * rid of any duplicate entries, so that we can assume that indices_count
+	 * is exactly equal to the number of lexemes that will be removed.
+	 */
+	if (indices_count > 1)
+	{
+		int			kp;
+
+		qsort(indices_to_delete, indices_count, sizeof(int), compare_int);
+		kp = 0;
+		for (k = 1; k < indices_count; k++)
+		{
+			if (indices_to_delete[k] != indices_to_delete[kp])
+				indices_to_delete[++kp] = indices_to_delete[k];
+		}
+		indices_count = ++kp;
+	}
+
+	/*
+	 * Here we overestimate tsout size, since we don't know how much space is
+	 * used by the deleted lexeme(s).  We will set exact size below.
+	 */
+	tsout = (TSVector) palloc0(VARSIZE(tsv));
+
+	/* This count must be correct because STRPTR(tsout) relies on it. */
+	TS_SETCOUNT(tsout, TS_COUNT(tsv) - indices_count);
+
+	/*
+	 * Copy tsv to tsout, skipping lexemes listed in indices_to_delete.
+	 */
+
+	INITPOS(pos);
+	for (i = j = k = 0; i < TS_COUNT(tsv); i++)
+	{
+		char	*lex = STRPTR(tsv) + pos;
+		int		 lex_len = ENTRY_LEN(tsv, ptr);
+
+		/*
+		 * If current i is present in indices_to_delete, skip this lexeme.
+		 * Since indices_to_delete is already sorted, we only need to check
+		 * the current (k'th) entry.
+		 */
+		if (k < indices_count && i == indices_to_delete[k])
+		{
+			k++;
+			goto next;
+		}
+
+		tsvector_addlexeme(tsout, j++, &curoff, lex, lex_len,
+				POSDATAPTR(lex, lex_len), ENTRY_NPOS(tsv, ptr));
+
+next:
+		INCRPTR(tsv, ptr, pos);
+	}
+
+	/*
+	 * k should now be exactly equal to indices_count. If it isn't then the
+	 * caller provided us with indices outside of [0, tsv->size) range and
+	 * estimation of tsout's size is wrong.
+	 */
+	Assert(k == indices_count);
+	SET_VARSIZE(tsout, CALCDATASIZE(TS_COUNT(tsout), curoff));
 	return tsout;
 }
 
@@ -513,7 +611,7 @@ tsvector_delete_arr(PG_FUNCTION_ARGS)
 	tsout = tsvector_delete_by_indices(tsin, skip_indices, skip_count);
 
 	pfree(skip_indices);
-	/* TODO: free tsin right way */
+	PG_FREE_IF_COPY(tsin, 0);
 	PG_FREE_IF_COPY(lexemes, 1);
 
 	PG_RETURN_POINTER(tsout);
@@ -794,15 +892,251 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 Datum
 tsvector_filter(PG_FUNCTION_ARGS)
 {
-	TSVector	tsin = PG_GETARG_TSVECTOR_COPY(0);
-	PG_RETURN_POINTER(tsin);
+	TSVector	out = PG_GETARG_TSVECTOR_COPY(0);
+	PG_RETURN_TSVECTOR(out);
+}
+
+/* Get max position in in1; we'll need this to offset in2's positions */
+static int
+get_maxpos(TSVector tsv)
+{
+	int				i,
+					j,
+					maxpos = 0;
+	WordEntry	   *ptr = ARRPTR(tsv);
+	uint32			pos;
+	WordEntryPos   *apos;
+
+	INITPOS(pos);
+	for (i = 0; i < TS_COUNT(tsv); i++)
+	{
+		apos = POSDATAPTR(STRPTR(tsv) + pos, ENTRY_LEN(tsv, ptr));
+		for (j = 0; j < ENTRY_NPOS(tsv, ptr); j++)
+		{
+			if (WEP_GETPOS(apos[j]) > maxpos)
+				maxpos = WEP_GETPOS(apos[j]);
+		}
+
+		INCRPTR(tsv, ptr, pos);
+	}
+
+	return maxpos;
 }
 
 Datum
 tsvector_concat(PG_FUNCTION_ARGS)
 {
-	TSVector	in1 = PG_GETARG_TSVECTOR_COPY(0);
-	PG_RETURN_POINTER(in1);
+	TSVector	in1 = PG_GETARG_TSVECTOR(0);
+	TSVector	in2 = PG_GETARG_TSVECTOR(1);
+	TSVector	out;
+	WordEntry  *ptr;
+	WordEntry  *ptr1,
+			   *ptr2;
+	int			maxpos = 0,
+				i,
+				i1,
+				i2,
+				output_bytes;
+	char	   *data;
+	uint32		pos1,
+				pos2,
+				dataoff;
+
+
+	ptr1 = ARRPTR(in1);
+	ptr2 = ARRPTR(in2);
+	i1 = TS_COUNT(in1);
+	i2 = TS_COUNT(in2);
+
+	/*
+	 * Conservative estimate of space needed.  We might need all the data in
+	 * both inputs, and conceivably add a pad bytes before lexeme and position
+	 * data, and pad bytes before WordEntry for offset entry.
+	 */
+	output_bytes = VARSIZE(in1) + VARSIZE(in2) + i1 * 2 + i2 * 2;
+	output_bytes += 4 * (i1 + i2) / TS_OFFSET_STRIDE;
+
+	out = (TSVector) palloc0(output_bytes);
+	SET_VARSIZE(out, output_bytes);
+
+	/*
+	 * We must make out->size valid so that STRPTR(out) is sensible.  We'll
+	 * collapse out any unused space at the end.
+	 */
+	TS_SETCOUNT(out, i1 + i2);
+
+	ptr = NULL;
+	data = STRPTR(out);
+	i = 0;
+	dataoff = 0;
+
+	INITPOS(pos1);
+	INITPOS(pos2);
+
+	/*
+	 * we will need max position from first tsvector to add it positions of
+	 * second tsvector
+	 */
+	maxpos = get_maxpos(in1);
+
+	while (i1 && i2)
+	{
+		char   *lex = STRPTR(in1) + pos1,
+			   *lex2 = STRPTR(in2) + pos2;
+
+		int		lex_len = ENTRY_LEN(in1, ptr1),
+				lex2_len = ENTRY_LEN(in2, ptr2);
+
+		int		cmp = tsCompareString(lex, lex_len,	lex2, lex2_len,	false);
+
+		if (cmp < 0)
+		{						/* in1 first */
+			tsvector_addlexeme(out, i, &dataoff,
+					lex, lex_len,
+					POSDATAPTR(lex, lex_len), ENTRY_NPOS(in1, ptr1));
+
+			INCRPTR(in1, ptr1, pos1);
+			i1--;
+			i++;
+		}
+		else if (cmp > 0)
+		{						/* in2 first */
+			char		*new_lex;
+			WordEntry	*we = UNWRAP_ENTRY(in2, ptr2);
+
+			new_lex = tsvector_addlexeme(out, i, &dataoff, lex2, lex2_len, NULL, 0);
+			if (we->npos_ > 0)
+			{
+				int				addlen;
+				WordEntryPos   *apos = POSDATAPTR(new_lex, lex2_len);
+
+				addlen = add_pos(lex2, we, apos, 0, maxpos);
+				if (addlen > 0)
+				{
+					ptr = UNWRAP_ENTRY(out, ARRPTR(out) + i);
+					ptr->npos_ = addlen;
+					dataoff = SHORTALIGN(dataoff);
+					dataoff += ptr->npos_ * sizeof(WordEntryPos);
+				}
+			}
+
+			INCRPTR(in2, ptr2, pos2);
+			i++;
+			i2--;
+		}
+		else
+		{
+			char		   *new_lex;
+			int				npos1 = ENTRY_NPOS(in1, ptr1),
+							npos2 = ENTRY_NPOS(in2, ptr2);
+			WordEntryPos   *apos;
+
+			new_lex = tsvector_addlexeme(out, i, &dataoff, lex, lex_len, NULL, 0);
+			apos = POSDATAPTR(new_lex, lex_len);
+
+			if (npos1 || npos2)
+			{
+				int			addlen;
+				char	   *lex2 = STRPTR(in2) + pos2;
+
+				ptr = UNWRAP_ENTRY(out, ARRPTR(out) + i);
+				if (npos1)
+				{
+					/* add positions from left tsvector */
+					addlen = add_pos(lex, UNWRAP_ENTRY(in1, ptr1), apos, 0, 0);
+					ptr->npos_ = addlen;
+
+					if (npos2)
+					{
+						/* add positions from right right tsvector */
+						addlen = add_pos(lex2, UNWRAP_ENTRY(in2, ptr2), apos, addlen, maxpos);
+						ptr->npos_ += addlen;
+					}
+				}
+				else	/* npos in second should be > 0 */
+				{
+					/* add positions from right tsvector */
+					addlen = add_pos(lex2, UNWRAP_ENTRY(in2, ptr2), apos, 0, maxpos);
+					ptr->npos_ = addlen;
+				}
+
+				dataoff = SHORTALIGN(dataoff);
+				dataoff += ptr->npos_ * sizeof(WordEntryPos);
+			}
+
+			INCRPTR(in1, ptr1, pos1);
+			INCRPTR(in2, ptr2, pos2);
+			i++;
+			i1--;
+			i2--;
+		}
+	}
+
+	while (i1)
+	{
+		char   *lex = STRPTR(in1) + pos1;
+		int		lex_len = ENTRY_LEN(in1, ptr1);
+
+		tsvector_addlexeme(out, i, &dataoff,
+				lex, lex_len,
+				POSDATAPTR(lex, lex_len), ENTRY_NPOS(in1, ptr1));
+
+		INCRPTR(in1, ptr1, pos1);
+		i++;
+		i1--;
+	}
+
+	while (i2)
+	{
+		char   *lex = STRPTR(in2) + pos2,
+			   *new_lex;
+		int		lex_len = ENTRY_LEN(in2, ptr2),
+				npos = ENTRY_NPOS(in2, ptr2);
+
+		new_lex = tsvector_addlexeme(out, i, &dataoff, lex, lex_len, NULL, 0);
+		if (npos > 0)
+		{
+			int				addlen;
+			WordEntryPos   *apos = POSDATAPTR(new_lex, lex_len);
+
+			addlen = add_pos(lex, UNWRAP_ENTRY(in2, ptr2), apos, 0, maxpos);
+			if (addlen > 0)
+			{
+				WordEntry	*ptr = UNWRAP_ENTRY(out, ARRPTR(out) + i);
+				ptr->npos_ = addlen;
+				dataoff = SHORTALIGN(dataoff);
+				dataoff += npos * sizeof(WordEntryPos);
+			}
+		}
+
+		INCRPTR(in2, ptr2, pos2);
+		i++;
+		i2--;
+	}
+
+	/*
+	 * Instead of checking each offset individually, we check for overflow of
+	 * pos fields once at the end.
+	 */
+	if (dataoff > MAXSTRPOS)
+		ereport(ERROR,
+				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				 errmsg("string is too long for tsvector (%d bytes, max %d bytes)", dataoff, MAXSTRPOS)));
+
+	/*
+	 * Adjust sizes (asserting that we didn't overrun the original estimates)
+	 * and collapse out any unused array entries.
+	 */
+	TS_SETCOUNT(out, i);
+	if (data != STRPTR(out))
+		memmove(STRPTR(out), data, dataoff);
+	output_bytes = CALCDATASIZE(TS_COUNT(out), dataoff);
+	Assert(output_bytes <= VARSIZE(out));
+	SET_VARSIZE(out, output_bytes);
+
+	PG_FREE_IF_COPY(in1, 0);
+	PG_FREE_IF_COPY(in2, 1);
+	PG_RETURN_POINTER(out);
 }
 
 /*
