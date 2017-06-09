@@ -156,8 +156,8 @@ make_tsvector(ParsedText *prs)
 	int			i,
 				lenstr = 0,
 				totallen;
-	TSVector	in;
-	uint32		stroff;
+	TSVector		in;
+	int			stroff;
 
 	prs->curwords = uniqueWORD(prs->words, prs->curwords);
 	for (i = 0; i < prs->curwords; i++)

@@ -173,8 +173,8 @@ tsvector_strip(PG_FUNCTION_ARGS)
 	TSVector	in = PG_GETARG_TSVECTOR(0);
 	TSVector	out;
 	int			i,
-				count;
-	uint32		posout = 0,
+				count,
+				posout = 0,
 				pos,
 				len;
 	WordEntry  *entryin = ARRPTR(in);
@@ -469,8 +469,8 @@ tsvector_delete_by_indices(TSVector tsv, int *indices_to_delete,
 	WordEntry  *ptr = ARRPTR(tsv);
 	int			i,				/* index in input tsvector */
 				j,				/* index in output tsvector */
-				k;				/* index in indices_to_delete */
-	uint32		curoff = 0,			/* index in data area of output */
+				k,				/* index in indices_to_delete */
+				curoff = 0,		/* index in data area of output */
 				pos;
 
 	/*
@@ -747,13 +747,59 @@ tsvector_to_array(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(array);
 }
 
+/*
+ * Returns offset by given index in TSVector,
+ * this function used when we need random access
+ */
+int
+tsvector_getoffset(TSVector vec, int idx, WordEntry **we)
+{
+	int			offset = 0;
+	WordEntry  *entry;
 
-/* Returns pointer to lexeme start */
+	entry = ARRPTR(vec) + idx;
+	if (we)
+		*we = entry;
+
+	while (!entry->hasoff)
+	{
+		entry--;
+		if (!entry->hasoff)
+			offset += SHORTALIGN(entry->len_) + entry->npos_ * sizeof(WordEntryPos);
+	}
+
+	Assert(entry >= ARRPTR(vec));
+
+	if (idx % TS_OFFSET_STRIDE)
+	{
+		/* if idx is by offset */
+		WordEntry *offset_entry = (WordEntry *) (STRPTR(vec) + entry->offset);
+
+		offset += entry->offset + sizeof(WordEntry);
+		offset += SHORTALIGN(offset_entry->len_) + offset_entry->npos_ * sizeof(WordEntryPos);
+	}
+	else
+	{
+		Assert(entry == ARRPTR(vec) + idx);
+
+		if (we)
+			*we = (WordEntry *) (STRPTR(vec) + entry->offset);
+		offset = entry->offset + sizeof(WordEntry);
+	}
+
+	return offset;
+}
+
+/*
+ * Add lexeme and its positions to tsvector and move dataoff (offset where
+ * data should be added) to new position.
+ * Returns pointer to lexeme start
+ */
 char *
-tsvector_addlexeme(TSVector tsv, int idx, uint32 *dataoff,
+tsvector_addlexeme(TSVector tsv, int idx, int *dataoff,
 		char *lexeme, int lexeme_len, WordEntryPos *pos, int npos)
 {
-	uint32		stroff;
+	int			stroff;
 	WordEntry  *entry;
 	char	   *result;
 
@@ -832,9 +878,9 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 	int			nitems,
 				i,
 				j,
-				tslen;
-	uint32		cur = 0;
-	long		datalen = 0;
+				tslen,
+				cur = 0,
+				datalen = 0;
 
 	deconstruct_array(v, TEXTOID, -1, false, 'i', &dlexemes, &nulls, &nitems);
 
@@ -899,10 +945,10 @@ tsvector_filter(PG_FUNCTION_ARGS)
 	bool	   *nulls;
 	int			nweights;
 	int			i,
-				j;
-	char		mask = 0;
-	uint32		dataoff = 0,
+				j,
+				dataoff = 0,
 				pos;
+	char		mask = 0;
 	WordEntry  *ptr = ARRPTR(tsin);
 
 	deconstruct_array(weights, CHAROID, 1, true, 'c',
@@ -1022,22 +1068,21 @@ get_maxpos(TSVector tsv)
 Datum
 tsvector_concat(PG_FUNCTION_ARGS)
 {
-	TSVector	in1 = PG_GETARG_TSVECTOR(0);
-	TSVector	in2 = PG_GETARG_TSVECTOR(1);
-	TSVector	out;
-	WordEntry  *ptr;
-	WordEntry  *ptr1,
+	TSVector	in1 = PG_GETARG_TSVECTOR(0),
+				in2 = PG_GETARG_TSVECTOR(1),
+				out;
+	WordEntry  *ptr,
+			   *ptr1,
 			   *ptr2;
 	int			maxpos = 0,
 				i,
 				i1,
 				i2,
-				output_bytes;
-	char	   *data;
-	uint32		pos1,
+				output_bytes,
+				pos1,
 				pos2,
 				dataoff;
-
+	char	   *data;
 
 	ptr1 = ARRPTR(in1);
 	ptr2 = ARRPTR(in2);

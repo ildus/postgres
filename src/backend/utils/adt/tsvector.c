@@ -215,7 +215,7 @@ tsvectorin(PG_FUNCTION_ARGS)
 	int			toklen;
 	WordEntryPos *pos;
 	int			poslen;
-	uint32		stroff;
+	int			stroff;
 
 	/*
 	 * Tokens are appended to tmpbuf, cur is a pointer to the end of used
@@ -453,11 +453,11 @@ tsvectorrecv(PG_FUNCTION_ARGS)
 {
 	StringInfo	buf = (StringInfo) PG_GETARG_POINTER(0);
 	TSVector	vec;
-	int			i;
-	int32		nentries;
-	uint32		datalen;		/* number of bytes used in the variable size
+	int			i,
+				datalen;		/* number of bytes used in the variable size
 								 * area after fixed size TSVector header and
 								 * WordEntries */
+	int32		nentries;
 	Size		hdrlen;
 	Size		len;			/* allocated size of vec */
 	bool		needSort = false;

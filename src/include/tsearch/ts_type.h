@@ -14,7 +14,6 @@
 
 #include "fmgr.h"
 #include "utils/memutils.h"
-#include "utils/expandeddatum.h"
 
 
 /*
@@ -171,63 +170,6 @@ do {													\
 #define PG_RETURN_TSVECTOR(x)		return TSVectorGetDatum(x)
 
 /*
- * Returns offset by given index in TSVector,
- * this function used when we need random access
- */
-inline static uint32
-tsvector_getoffset(TSVector vec, int idx, WordEntry **we)
-{
-	uint32		offset = 0;
-	WordEntry  *entry;
-
-	entry = ARRPTR(vec) + idx;
-	if (we)
-		*we = entry;
-
-	while (!entry->hasoff)
-	{
-		entry--;
-		if (!entry->hasoff)
-			offset += SHORTALIGN(entry->len_) + entry->npos_ * sizeof(WordEntryPos);
-	}
-
-	Assert(entry >= ARRPTR(vec));
-
-	if (idx % TS_OFFSET_STRIDE)
-	{
-		/* if idx is by offset */
-		WordEntry *offset_entry = (WordEntry *) (STRPTR(vec) + entry->offset);
-
-		offset += entry->offset + sizeof(WordEntry);
-		offset += SHORTALIGN(offset_entry->len_) + offset_entry->npos_ * sizeof(WordEntryPos);
-	}
-	else
-	{
-		Assert(entry == ARRPTR(vec) + idx);
-
-		if (we)
-			*we = (WordEntry *) (STRPTR(vec) + entry->offset);
-		offset = entry->offset + sizeof(WordEntry);
-	}
-
-	return offset;
-}
-
-/* Returns lexeme and its entry by given index from TSVector */
-inline static char *
-tsvector_getlexeme(TSVector vec, int idx, WordEntry **we)
-{
-	Assert(idx >=0 && idx < TS_COUNT(vec));
-
-	/*
-	 * we do not allow we == NULL because returned lexeme is not \0 ended,
-	 * and always should be used with we->len
-	 */
-	Assert(we != NULL);
-	return STRPTR(vec) + tsvector_getoffset(vec, idx, we);
-}
-
-/*
  * TSQuery
  *
  *
@@ -344,7 +286,22 @@ typedef TSQueryData *TSQuery;
 #define PG_GETARG_TSQUERY_COPY(n)	DatumGetTSQueryCopy(PG_GETARG_DATUM(n))
 #define PG_RETURN_TSQUERY(x)		return TSQueryGetDatum(x)
 
-char *tsvector_addlexeme(TSVector tsv, int idx, uint32 *dataoff,
+int tsvector_getoffset(TSVector vec, int idx, WordEntry **we);
+char *tsvector_addlexeme(TSVector tsv, int idx, int *dataoff,
 		char *lexeme, int lexeme_len, WordEntryPos *pos, int npos);
+
+/* Returns lexeme and its entry by given index from TSVector */
+inline static char *
+tsvector_getlexeme(TSVector vec, int idx, WordEntry **we)
+{
+	Assert(idx >=0 && idx < TS_COUNT(vec));
+
+	/*
+	 * we do not allow we == NULL because returned lexeme is not \0 ended,
+	 * and always should be used with we->len
+	 */
+	Assert(we != NULL);
+	return STRPTR(vec) + tsvector_getoffset(vec, idx, we);
+}
 
 #endif   /* _PG_TSTYPE_H_ */
