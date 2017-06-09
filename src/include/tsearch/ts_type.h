@@ -162,8 +162,10 @@ do {													\
  * fmgr interface macros
  */
 
-#define DatumGetTSVector(X)			((TSVector) PG_DETOAST_DATUM(X))
-#define DatumGetTSVectorCopy(X)		((TSVector) PG_DETOAST_DATUM_COPY(X))
+TSVector tsvector_upgrade(Datum orig, bool copy);
+
+#define DatumGetTSVector(X)			tsvector_upgrade((X), true)
+#define DatumGetTSVectorCopy(X)		tsvector_upgrade((X), false)
 #define TSVectorGetDatum(X)			PointerGetDatum(X)
 #define PG_GETARG_TSVECTOR(n)		DatumGetTSVector(PG_GETARG_DATUM(n))
 #define PG_GETARG_TSVECTOR_COPY(n)	DatumGetTSVectorCopy(PG_GETARG_DATUM(n))
