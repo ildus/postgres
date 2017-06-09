@@ -757,6 +757,9 @@ tsvector_addlexeme(TSVector tsv, int idx, uint32 *dataoff,
 	WordEntry  *entry;
 	char	   *result;
 
+	/* when idx is 0, dataoff should be 0 too, and otherwise */
+	Assert(!((idx == 0) ^ (*dataoff == 0)));
+
 	stroff = *dataoff;
 	entry = ARRPTR(tsv) + idx;
 
@@ -806,11 +809,7 @@ tsvector_addlexeme(TSVector tsv, int idx, uint32 *dataoff,
 
 		/* Copy positions */
 		if (pos)
-		{
-			/* FIXME: check weights or maybe set them to zero */
 			memcpy(STRPTR(tsv) + stroff, pos, npos * sizeof(WordEntryPos));
-		} else
-			MemSet(STRPTR(tsv) + stroff, 0, npos * sizeof(WordEntryPos));
 
 		stroff += npos * sizeof(WordEntryPos);
 	}
@@ -892,8 +891,105 @@ array_to_tsvector(PG_FUNCTION_ARGS)
 Datum
 tsvector_filter(PG_FUNCTION_ARGS)
 {
-	TSVector	out = PG_GETARG_TSVECTOR_COPY(0);
-	PG_RETURN_TSVECTOR(out);
+	TSVector	tsin = PG_GETARG_TSVECTOR(0),
+				tsout;
+	ArrayType  *weights = PG_GETARG_ARRAYTYPE_P(1);
+	char	   *dataout;
+	Datum	   *dweights;
+	bool	   *nulls;
+	int			nweights;
+	int			i,
+				j;
+	char		mask = 0;
+	uint32		dataoff = 0,
+				pos;
+	WordEntry  *ptr = ARRPTR(tsin);
+
+	deconstruct_array(weights, CHAROID, 1, true, 'c',
+					  &dweights, &nulls, &nweights);
+
+	for (i = 0; i < nweights; i++)
+	{
+		char		char_weight;
+
+		if (nulls[i])
+			ereport(ERROR,
+					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+					 errmsg("weight array may not contain nulls")));
+
+		char_weight = DatumGetChar(dweights[i]);
+		switch (char_weight)
+		{
+			case 'A':
+			case 'a':
+				mask = mask | 8;
+				break;
+			case 'B':
+			case 'b':
+				mask = mask | 4;
+				break;
+			case 'C':
+			case 'c':
+				mask = mask | 2;
+				break;
+			case 'D':
+			case 'd':
+				mask = mask | 1;
+				break;
+			default:
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("unrecognized weight: \"%c\"", char_weight)));
+		}
+	}
+
+	tsout = (TSVector) palloc0(VARSIZE(tsin));
+	TS_SETCOUNT(tsout, TS_COUNT(tsin));
+	dataout = STRPTR(tsout);
+
+	INITPOS(pos);
+	for (i = j = 0; i < TS_COUNT(tsin); i++)
+	{
+		WordEntryPos   *posin,
+					   *posout;
+		int				k,
+						npos = 0,
+						lex_len = ENTRY_LEN(tsin, ptr);
+		char		   *lex = STRPTR(tsin) + pos,
+					   *lexout;
+
+		posin = POSDATAPTR(lex, lex_len);
+		for (k = 0; k < ENTRY_NPOS(tsin, ptr); k++)
+		{
+			if (mask & (1 << WEP_GETWEIGHT(posin[k])))
+				npos++;
+		}
+
+		if (!npos)
+			goto next;
+
+		lexout = tsvector_addlexeme(tsout, j++, &dataoff, lex, lex_len,
+				NULL, npos);
+		posout =  POSDATAPTR(lexout, lex_len);
+		npos = 0;
+		for (k = 0; k < ENTRY_NPOS(tsin, ptr); k++)
+		{
+			if (mask & (1 << WEP_GETWEIGHT(posin[k])))
+				posout[npos++] = posin[k];
+		}
+
+next:
+		INCRPTR(tsin, ptr, pos);
+	}
+
+	TS_SETCOUNT(tsout, j);
+	if (dataout != STRPTR(tsout))
+		memmove(STRPTR(tsout), dataout, dataoff);
+
+	SET_VARSIZE(tsout, CALCDATASIZE(TS_COUNT(tsout), dataoff));
+
+	PG_FREE_IF_COPY(tsin, 0);
+	PG_RETURN_POINTER(tsout);
 }
 
 /* Get max position in in1; we'll need this to offset in2's positions */
