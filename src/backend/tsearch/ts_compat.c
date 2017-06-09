@@ -51,7 +51,7 @@ tsvector_upgrade(Datum orig, bool copy)
 	totallen = CALCDATASIZE(in->size_, datalen);
 	out = (TSVector) palloc0(totallen);
 	SET_VARSIZE(out, totallen);
-	TS_SETCOUNT(in, in->size_);
+	TS_SETCOUNT(out, in->size_);
 
 	for (i = 0; i < in->size_; i++)
 	{
