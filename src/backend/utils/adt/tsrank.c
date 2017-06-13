@@ -60,7 +60,7 @@ cnt_length(TSVector t)
 	{
 		WordEntry *entry = UNWRAP_ENTRY(t, ARRPTR(t) + i);
 		Assert(!entry->hasoff);
-		len += (entry->npos_ == 0) ? 1 : entry->npos_;
+		len += (entry->npos == 0) ? 1 : entry->npos;
 	}
 
 	return len;
@@ -95,7 +95,7 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 		lexeme = tsvector_getlexeme(t, StopMiddle, &we);
 
 		Assert(!we->hasoff);
-		difference = WordECompareQueryItem(lexeme, we->len_,
+		difference = WordECompareQueryItem(lexeme, we->len,
 			GETOPERAND(q), item, false);
 
 		if (difference == 0)
@@ -122,7 +122,7 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 			lexeme = tsvector_getlexeme(t, StopMiddle, &we);
 
 			Assert(!we->hasoff);
-			if (WordECompareQueryItem(lexeme, we->len_, GETOPERAND(q), item, true) != 0)
+			if (WordECompareQueryItem(lexeme, we->len, GETOPERAND(q), item, true) != 0)
 				break;
 
 			(*nitem)++;
@@ -250,10 +250,10 @@ calc_rank_and(const float *w, TSVector t, TSQuery q)
 			char *lexeme = tsvector_getlexeme(t, idx, &entry);
 
 			Assert(!entry->hasoff);
-			if (entry->npos_)
+			if (entry->npos)
 			{
-				pos[i] = POSDATAPTR(lexeme, entry->len_);
-				npos[i] = entry->npos_;
+				pos[i] = POSDATAPTR(lexeme, entry->len);
+				npos[i] = entry->npos;
 			}
 			else
 			{
@@ -332,10 +332,10 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 			char *lexeme = tsvector_getlexeme(t, idx, &entry);
 
 			Assert(!entry->hasoff);
-			if (entry->npos_)
+			if (entry->npos)
 			{
-				dimt = entry->npos_;
-				post = POSDATAPTR(lexeme, entry->len_);
+				dimt = entry->npos;
+				post = POSDATAPTR(lexeme, entry->len);
 			}
 			else
 			{
@@ -782,10 +782,10 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 			char		*lex = tsvector_getlexeme(txt, idx, &entry);
 
 			Assert(!entry->hasoff);
-			if (entry->npos_)
+			if (entry->npos)
 			{
-				dimt = entry->npos_;
-				post = POSDATAPTR(lex, entry->len_);
+				dimt = entry->npos;
+				post = POSDATAPTR(lex, entry->len);
 			}
 			else
 			{

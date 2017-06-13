@@ -24,18 +24,18 @@
  * 2) int32		size - number of lexemes (WordEntry array entries)
  * 3) Array of WordEntry - one per lexeme; must be sorted according to
  *				tsCompareString() (ie, memcmp of lexeme strings).
- *				WordEntry->pos gives the number of bytes from end of WordEntry
- *				array to start of lexeme's string, which is of length len.
+ *	  WordEntry have two types: offset or metadata (length of lexeme and number
+ *	  of positions). If it has offset then metadata will be by this offset.
  * 4) Per-lexeme data storage:
- *	  lexeme string (not null-terminated)
- *	  if haspos is true:
+ *    [4-byte aligned WordEntry] (if its WordEntry has offset)
+ *	  2-byte aligned lexeme string (not null-terminated)
+ *	  if it has positions:
  *		padding byte if necessary to make the position data 2-byte aligned
- *		uint16			number of positions that follow
  *		WordEntryPos[]	positions
  *
  * The positions for each lexeme must be sorted.
  *
- * Note, tsvectorsend/recv believe that sizeof(WordEntry) == 4
+ * Note, tsvector functions believe that sizeof(WordEntry) == 4
  */
 
 #define TS_OFFSET_STRIDE 4
@@ -48,8 +48,8 @@ typedef union
 	};
 	struct {
 		uint32 hasoff_: 1,
-			   len_:11,
-			   npos_: 16,
+			   len:11,
+			   npos: 16,
 			   _unused: 4;
 	};
 } WordEntry;
@@ -94,7 +94,7 @@ typedef uint16 WordEntryPos;
 typedef struct
 {
 	int32		vl_len_;		/* varlena header (do not touch directly!) */
-	int32		size_;
+	int32		size_;			/* flags and lexemes count */
 	WordEntry	entries[FLEXIBLE_ARRAY_MEMBER];
 	/* lexemes follow the entries[] array */
 } TSVectorData;
@@ -122,8 +122,8 @@ typedef TSVectorData *TSVector;
  * helpers used when we're not sure that WordEntry
  * contains ether offset or len
  */
-#define ENTRY_NPOS(x,we) (UNWRAP_ENTRY(x,we)->npos_)
-#define ENTRY_LEN(x,we) (UNWRAP_ENTRY(x,we)->len_)
+#define ENTRY_NPOS(x,we) (UNWRAP_ENTRY(x,we)->npos)
+#define ENTRY_LEN(x,we) (UNWRAP_ENTRY(x,we)->len)
 
 /* pointer to start of positions */
 #define POSDATAPTR(lex, len) ((WordEntryPos *) (lex + SHORTALIGN(len)))
@@ -142,7 +142,7 @@ do { \
 	}													\
 	(w)++;												\
 	Assert(!y->hasoff);									\
-	(p) += SHORTALIGN(y->len_) + y->npos_ * sizeof(WordEntryPos); \
+	(p) += SHORTALIGN(y->len) + y->npos * sizeof(WordEntryPos); \
 	if ((w) - ARRPTR(x) < TS_COUNT(x) && w->hasoff)		\
 		(p) = INTALIGN(p) + sizeof(WordEntry);			\
 } while (0);
