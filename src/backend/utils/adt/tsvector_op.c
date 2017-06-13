@@ -176,7 +176,7 @@ tsvector_strip(PG_FUNCTION_ARGS)
 				count,
 				posout = 0,
 				pos,
-				len;
+				len = 0;
 	WordEntry  *entryin = ARRPTR(in);
 
 	count = TS_COUNT(in);
