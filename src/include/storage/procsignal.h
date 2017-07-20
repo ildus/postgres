@@ -57,4 +57,4 @@ extern int SendProcSignal(pid_t pid, ProcSignalReason reason,
 
 extern void procsignal_sigusr1_handler(SIGNAL_ARGS);
 
-#endif   /* PROCSIGNAL_H */
+#endif							/* PROCSIGNAL_H */

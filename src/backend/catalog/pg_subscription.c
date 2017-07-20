@@ -28,6 +28,8 @@
 
 #include "nodes/makefuncs.h"
 
+#include "storage/lmgr.h"
+
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -246,6 +248,8 @@ SetSubscriptionRelState(Oid subid, Oid relid, char state,
 	bool		nulls[Natts_pg_subscription_rel];
 	Datum		values[Natts_pg_subscription_rel];
 
+	LockSharedObject(SubscriptionRelationId, subid, 0, AccessShareLock);
+
 	rel = heap_open(SubscriptionRelRelationId, RowExclusiveLock);
 
 	/* Try finding existing mapping. */
@@ -401,7 +405,7 @@ RemoveSubscriptionRel(Oid subid, Oid relid)
 	scan = heap_beginscan_catalog(rel, nkeys, skey);
 	while (HeapTupleIsValid(tup = heap_getnext(scan, ForwardScanDirection)))
 	{
-		simple_heap_delete(rel, &tup->t_self);
+		CatalogTupleDelete(rel, &tup->t_self);
 	}
 	heap_endscan(scan);
 

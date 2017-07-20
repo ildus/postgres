@@ -417,7 +417,7 @@ tsvector_bsearch(const TSVector tsv, char *lexeme, int lexeme_len)
 			StopHigh = StopMiddle;
 		else if (cmp > 0)
 			StopLow = StopMiddle + 1;
-		else	/* found it */
+		else					/* found it */
 			return StopMiddle;
 	}
 
@@ -669,8 +669,7 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 		Datum		values[3];
 
 		values[0] = PointerGetDatum(
-				  cstring_to_text_with_len(data + pos, lex_len)
-			);
+			cstring_to_text_with_len(data + pos, lex_len));
 
 		if (npos)
 		{
@@ -691,14 +690,14 @@ tsvector_unnest(PG_FUNCTION_ARGS)
 				positions[j] = Int16GetDatum(WEP_GETPOS(apos[j]));
 				weight = 'D' - WEP_GETWEIGHT(apos[j]);
 				weights[j] = PointerGetDatum(
-										 cstring_to_text_with_len(&weight, 1)
+											 cstring_to_text_with_len(&weight, 1)
 					);
 			}
 
 			values[1] = PointerGetDatum(
-			  construct_array(positions, npos, INT2OID, 2, true, 's'));
+					construct_array(positions, npos, INT2OID, 2, true, 's'));
 			values[2] = PointerGetDatum(
-			  construct_array(weights, npos, TEXTOID, -1, false, 'i'));
+					construct_array(weights, npos, TEXTOID, -1, false, 'i'));
 		}
 		else
 		{
@@ -735,8 +734,7 @@ tsvector_to_array(PG_FUNCTION_ARGS)
 	for (i = 0; i < TS_COUNT(tsin); i++)
 	{
 		elements[i] = PointerGetDatum(
-		  cstring_to_text_with_len(STRPTR(tsin) + pos, ENTRY_LEN(tsin, entry))
-			);
+		  cstring_to_text_with_len(STRPTR(tsin) + pos, ENTRY_LEN(tsin, entry)));
 		INCRPTR(tsin, entry, pos);
 	}
 
@@ -1375,7 +1373,7 @@ checkclass_str(WordEntryPos *pv, int npos, QueryOperand *val,
 				posvec_iter++;
 			}
 		}
-		else	/* data != NULL */
+		else					/* data != NULL */
 		{
 			data->npos = npos;
 			data->pos = pv;
@@ -1627,7 +1625,7 @@ TS_phrase_output(ExecPhraseData *data,
 			Lindex++;
 			Rindex++;
 		}
-		else	/* Lpos > Rpos */
+		else					/* Lpos > Rpos */
 		{
 			/* Rpos is not matched in Ldata, should we output it? */
 			if (emit & TSPO_R_ONLY)
@@ -2612,7 +2610,7 @@ tsvector_update_trigger(PG_FUNCTION_ARGS, bool config_column)
 	Oid			cfgId;
 
 	/* Check call context */
-	if (!CALLED_AS_TRIGGER(fcinfo))		/* internal error */
+	if (!CALLED_AS_TRIGGER(fcinfo)) /* internal error */
 		elog(ERROR, "tsvector_update_trigger: not fired by trigger manager");
 
 	trigdata = (TriggerData *) fcinfo->context;

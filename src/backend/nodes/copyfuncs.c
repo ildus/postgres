@@ -1222,8 +1222,8 @@ _copyTableFunc(const TableFunc *from)
 {
 	TableFunc  *newnode = makeNode(TableFunc);
 
-	COPY_NODE_FIELD(ns_names);
 	COPY_NODE_FIELD(ns_uris);
+	COPY_NODE_FIELD(ns_names);
 	COPY_NODE_FIELD(docexpr);
 	COPY_NODE_FIELD(rowexpr);
 	COPY_NODE_FIELD(colnames);
@@ -2303,10 +2303,11 @@ _copyRangeTblEntry(const RangeTblEntry *from)
 	COPY_STRING_FIELD(ctename);
 	COPY_SCALAR_FIELD(ctelevelsup);
 	COPY_SCALAR_FIELD(self_reference);
-	COPY_STRING_FIELD(enrname);
 	COPY_NODE_FIELD(coltypes);
 	COPY_NODE_FIELD(coltypmods);
 	COPY_NODE_FIELD(colcollations);
+	COPY_STRING_FIELD(enrname);
+	COPY_SCALAR_FIELD(enrtuples);
 	COPY_NODE_FIELD(alias);
 	COPY_NODE_FIELD(eref);
 	COPY_SCALAR_FIELD(lateral);
@@ -4004,8 +4005,8 @@ _copyCreateForeignServerStmt(const CreateForeignServerStmt *from)
 	COPY_STRING_FIELD(servertype);
 	COPY_STRING_FIELD(version);
 	COPY_STRING_FIELD(fdwname);
-	COPY_NODE_FIELD(options);
 	COPY_SCALAR_FIELD(if_not_exists);
+	COPY_NODE_FIELD(options);
 
 	return newnode;
 }
@@ -4030,8 +4031,8 @@ _copyCreateUserMappingStmt(const CreateUserMappingStmt *from)
 
 	COPY_NODE_FIELD(user);
 	COPY_STRING_FIELD(servername);
-	COPY_NODE_FIELD(options);
 	COPY_SCALAR_FIELD(if_not_exists);
+	COPY_NODE_FIELD(options);
 
 	return newnode;
 }

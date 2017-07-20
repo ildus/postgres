@@ -12,18 +12,18 @@
  *	  logical replication.
  *
  *	  The initial data synchronization is done separately for each table,
- *	  in separate apply worker that only fetches the initial snapshot data
- *	  from the publisher and then synchronizes the position in stream with
+ *	  in a separate apply worker that only fetches the initial snapshot data
+ *	  from the publisher and then synchronizes the position in the stream with
  *	  the main apply worker.
  *
- *	  The are several reasons for doing the synchronization this way:
+ *	  There are several reasons for doing the synchronization this way:
  *	   - It allows us to parallelize the initial data synchronization
  *		 which lowers the time needed for it to happen.
  *	   - The initial synchronization does not have to hold the xid and LSN
  *		 for the time it takes to copy data of all tables, causing less
  *		 bloat and lower disk consumption compared to doing the
- *		 synchronization in single process for whole database.
- *	   - It allows us to synchronize the tables added after the initial
+ *		 synchronization in a single process for the whole database.
+ *	   - It allows us to synchronize any tables added after the initial
  *		 synchronization has finished.
  *
  *	  The stream position synchronization works in multiple steps.
@@ -44,8 +44,8 @@
  *		 point it sets state to READY and stops tracking.  Again, there might
  *		 be zero changes in between.
  *
- *    So the state progression is always: INIT -> DATASYNC -> SYNCWAIT -> CATCHUP ->
- *    SYNCDONE -> READY.
+ *	  So the state progression is always: INIT -> DATASYNC -> SYNCWAIT -> CATCHUP ->
+ *	  SYNCDONE -> READY.
  *
  *	  The catalog pg_subscription_rel is used to keep information about
  *	  subscribed tables and their state.  Some transient state during data
@@ -136,7 +136,8 @@ finish_sync_worker(void)
 	StartTransactionCommand();
 	ereport(LOG,
 			(errmsg("logical replication table synchronization worker for subscription \"%s\", table \"%s\" has finished",
-					MySubscription->name, get_rel_name(MyLogicalRepWorker->relid))));
+					MySubscription->name,
+					get_rel_name(MyLogicalRepWorker->relid))));
 	CommitTransactionCommand();
 
 	/* Find the main apply worker and signal it. */
@@ -147,7 +148,7 @@ finish_sync_worker(void)
 }
 
 /*
- * Wait until the relation synchronization state is set in catalog to the
+ * Wait until the relation synchronization state is set in the catalog to the
  * expected one.
  *
  * Used when transitioning from CATCHUP state to SYNCDONE.
@@ -164,7 +165,7 @@ wait_for_relation_state_change(Oid relid, char expected_state)
 	for (;;)
 	{
 		LogicalRepWorker *worker;
-		XLogRecPtr		statelsn;
+		XLogRecPtr	statelsn;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -206,13 +207,12 @@ wait_for_relation_state_change(Oid relid, char expected_state)
 }
 
 /*
- * Wait until the the apply worker changes the state of our synchronization
+ * Wait until the apply worker changes the state of our synchronization
  * worker to the expected one.
  *
  * Used when transitioning from SYNCWAIT state to CATCHUP.
  *
- * Returns false if the apply worker has disappeared or table state has been
- * reset.
+ * Returns false if the apply worker has disappeared.
  */
 static bool
 wait_for_worker_state_change(char expected_state)
@@ -225,17 +225,30 @@ wait_for_worker_state_change(char expected_state)
 
 		CHECK_FOR_INTERRUPTS();
 
-		/* Bail if he apply has died. */
-		LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
-		worker = logicalrep_worker_find(MyLogicalRepWorker->subid,
-										InvalidOid, false);
-		LWLockRelease(LogicalRepWorkerLock);
-		if (!worker)
-			return false;
-
+		/*
+		 * Done if already in correct state.  (We assume this fetch is atomic
+		 * enough to not give a misleading answer if we do it with no lock.)
+		 */
 		if (MyLogicalRepWorker->relstate == expected_state)
 			return true;
 
+		/*
+		 * Bail out if the apply worker has died, else signal it we're
+		 * waiting.
+		 */
+		LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+		worker = logicalrep_worker_find(MyLogicalRepWorker->subid,
+										InvalidOid, false);
+		if (worker && worker->proc)
+			logicalrep_worker_wakeup_ptr(worker);
+		LWLockRelease(LogicalRepWorkerLock);
+		if (!worker)
+			break;
+
+		/*
+		 * Wait.  We expect to get a latch signal back from the apply worker,
+		 * but use a timeout in case it dies without sending one.
+		 */
 		rc = WaitLatch(MyLatch,
 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
 					   1000L, WAIT_EVENT_LOGICAL_SYNC_STATE_CHANGE);
@@ -244,7 +257,8 @@ wait_for_worker_state_change(char expected_state)
 		if (rc & WL_POSTMASTER_DEATH)
 			proc_exit(1);
 
-		ResetLatch(MyLatch);
+		if (rc & WL_LATCH_SET)
+			ResetLatch(MyLatch);
 	}
 
 	return false;
@@ -333,7 +347,7 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 
 	Assert(!IsTransactionState());
 
-	/* We need up to date sync state info for subscription tables here. */
+	/* We need up-to-date sync state info for subscription tables here. */
 	if (!table_states_valid)
 	{
 		MemoryContext oldctx;
@@ -365,7 +379,7 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 	}
 
 	/*
-	 * Prepare hash table for tracking last start times of workers, to avoid
+	 * Prepare a hash table for tracking last start times of workers, to avoid
 	 * immediate restarts.  We don't need it if there are no tables that need
 	 * syncing.
 	 */
@@ -401,8 +415,8 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 		{
 			/*
 			 * Apply has caught up to the position where the table sync has
-			 * finished.  Time to mark the table as ready so that apply will
-			 * just continue to replicate it normally.
+			 * finished.  Mark the table as ready so that the apply will just
+			 * continue to replicate it normally.
 			 */
 			if (current_lsn >= rstate->lsn)
 			{
@@ -421,83 +435,96 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 		else
 		{
 			LogicalRepWorker *syncworker;
-			int			nsyncworkers = 0;
 
+			/*
+			 * Look for a sync worker for this relation.
+			 */
 			LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
+
 			syncworker = logicalrep_worker_find(MyLogicalRepWorker->subid,
 												rstate->relid, false);
+
 			if (syncworker)
 			{
+				/* Found one, update our copy of its state */
 				SpinLockAcquire(&syncworker->relmutex);
 				rstate->state = syncworker->relstate;
 				rstate->lsn = syncworker->relstate_lsn;
+				if (rstate->state == SUBREL_STATE_SYNCWAIT)
+				{
+					/*
+					 * Sync worker is waiting for apply.  Tell sync worker it
+					 * can catchup now.
+					 */
+					syncworker->relstate = SUBREL_STATE_CATCHUP;
+					syncworker->relstate_lsn =
+						Max(syncworker->relstate_lsn, current_lsn);
+				}
 				SpinLockRelease(&syncworker->relmutex);
+
+				/* If we told worker to catch up, wait for it. */
+				if (rstate->state == SUBREL_STATE_SYNCWAIT)
+				{
+					/* Signal the sync worker, as it may be waiting for us. */
+					if (syncworker->proc)
+						logicalrep_worker_wakeup_ptr(syncworker);
+
+					/* Now safe to release the LWLock */
+					LWLockRelease(LogicalRepWorkerLock);
+
+					/*
+					 * Enter busy loop and wait for synchronization worker to
+					 * reach expected state (or die trying).
+					 */
+					if (!started_tx)
+					{
+						StartTransactionCommand();
+						started_tx = true;
+					}
+
+					wait_for_relation_state_change(rstate->relid,
+												   SUBREL_STATE_SYNCDONE);
+				}
+				else
+					LWLockRelease(LogicalRepWorkerLock);
 			}
 			else
-
-				/*
-				 * If no sync worker for this table yet, count running sync
-				 * workers for this subscription, while we have the lock, for
-				 * later.
-				 */
-				nsyncworkers = logicalrep_sync_worker_count(MyLogicalRepWorker->subid);
-			LWLockRelease(LogicalRepWorkerLock);
-
-			/*
-			 * There is a worker synchronizing the relation and waiting for
-			 * apply to do something.
-			 */
-			if (syncworker && rstate->state == SUBREL_STATE_SYNCWAIT)
 			{
 				/*
-				 * Tell sync worker it can catchup now. We'll wait for it so
-				 * it does not get lost.
+				 * If there is no sync worker for this table yet, count
+				 * running sync workers for this subscription, while we have
+				 * the lock.
 				 */
-				SpinLockAcquire(&syncworker->relmutex);
-				syncworker->relstate = SUBREL_STATE_CATCHUP;
-				syncworker->relstate_lsn =
-					Max(syncworker->relstate_lsn, current_lsn);
-				SpinLockRelease(&syncworker->relmutex);
+				int			nsyncworkers =
+				logicalrep_sync_worker_count(MyLogicalRepWorker->subid);
 
-				/* Signal the sync worker, as it may be waiting for us. */
-				logicalrep_worker_wakeup_ptr(syncworker);
+				/* Now safe to release the LWLock */
+				LWLockRelease(LogicalRepWorkerLock);
 
 				/*
-				 * Enter busy loop and wait for synchronization worker to
-				 * reach expected state (or die trying).
+				 * If there are free sync worker slot(s), start a new sync
+				 * worker for the table.
 				 */
-				if (!started_tx)
+				if (nsyncworkers < max_sync_workers_per_subscription)
 				{
-					StartTransactionCommand();
-					started_tx = true;
-				}
-				wait_for_relation_state_change(rstate->relid,
-											   SUBREL_STATE_SYNCDONE);
-			}
+					TimestampTz now = GetCurrentTimestamp();
+					struct tablesync_start_time_mapping *hentry;
+					bool		found;
 
-			/*
-			 * If there is no sync worker registered for the table and there
-			 * is some free sync worker slot, start new sync worker for the
-			 * table.
-			 */
-			else if (!syncworker && nsyncworkers < max_sync_workers_per_subscription)
-			{
-				TimestampTz now = GetCurrentTimestamp();
-				struct tablesync_start_time_mapping *hentry;
-				bool		found;
+					hentry = hash_search(last_start_times, &rstate->relid,
+										 HASH_ENTER, &found);
 
-				hentry = hash_search(last_start_times, &rstate->relid, HASH_ENTER, &found);
-
-				if (!found ||
-					TimestampDifferenceExceeds(hentry->last_start_time, now,
-											   wal_retrieve_retry_interval))
-				{
-					logicalrep_worker_launch(MyLogicalRepWorker->dbid,
-											 MySubscription->oid,
-											 MySubscription->name,
-											 MyLogicalRepWorker->userid,
-											 rstate->relid);
-					hentry->last_start_time = now;
+					if (!found ||
+						TimestampDifferenceExceeds(hentry->last_start_time, now,
+												   wal_retrieve_retry_interval))
+					{
+						logicalrep_worker_launch(MyLogicalRepWorker->dbid,
+												 MySubscription->oid,
+												 MySubscription->name,
+												 MyLogicalRepWorker->userid,
+												 rstate->relid);
+						hentry->last_start_time = now;
+					}
 				}
 			}
 		}
@@ -511,7 +538,7 @@ process_syncing_tables_for_apply(XLogRecPtr current_lsn)
 }
 
 /*
- * Process state possible change(s) of tables that are being synchronized.
+ * Process possible state change(s) of tables that are being synchronized.
  */
 void
 process_syncing_tables(XLogRecPtr current_lsn)
@@ -551,7 +578,7 @@ copy_read_data(void *outbuf, int minread, int maxread)
 	int			bytesread = 0;
 	int			avail;
 
-	/* If there are some leftover data from previous read, use them. */
+	/* If there are some leftover data from previous read, use it. */
 	avail = copybuf->len - copybuf->cursor;
 	if (avail)
 	{
@@ -681,7 +708,7 @@ fetch_remote_table_info(char *nspname, char *relname,
 					 "       a.attnum = ANY(i.indkey)"
 					 "  FROM pg_catalog.pg_attribute a"
 					 "  LEFT JOIN pg_catalog.pg_index i"
-			   "       ON (i.indexrelid = pg_get_replica_identity_index(%u))"
+					 "       ON (i.indexrelid = pg_get_replica_identity_index(%u))"
 					 " WHERE a.attnum > 0::pg_catalog.int2"
 					 "   AND NOT a.attisdropped"
 					 "   AND a.attrelid = %u"
@@ -694,7 +721,7 @@ fetch_remote_table_info(char *nspname, char *relname,
 				(errmsg("could not fetch table info for table \"%s.%s\": %s",
 						nspname, relname, res->err)));
 
-	/* We don't know number of rows coming, so allocate enough space. */
+	/* We don't know the number of rows coming, so allocate enough space. */
 	lrel->attnames = palloc0(MaxTupleAttributeNumber * sizeof(char *));
 	lrel->atttyps = palloc0(MaxTupleAttributeNumber * sizeof(Oid));
 	lrel->attkeys = NULL;
@@ -811,7 +838,7 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 	 * NAMEDATALEN on the remote that matters, but this scheme will also work
 	 * reasonably if that is different.)
 	 */
-	StaticAssertStmt(NAMEDATALEN >= 32, "NAMEDATALEN too small");		/* for sanity */
+	StaticAssertStmt(NAMEDATALEN >= 32, "NAMEDATALEN too small");	/* for sanity */
 	slotname = psprintf("%.*s_%u_sync_%u",
 						NAMEDATALEN - 28,
 						MySubscription->slotname,
@@ -852,23 +879,23 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 				pgstat_report_stat(false);
 
 				/*
-				 * We want to do the table data sync in single transaction.
+				 * We want to do the table data sync in a single transaction.
 				 */
 				StartTransactionCommand();
 
 				/*
-				 * Use standard write lock here. It might be better to
-				 * disallow access to table while it's being synchronized. But
-				 * we don't want to block the main apply process from working
-				 * and it has to open relation in RowExclusiveLock when
-				 * remapping remote relation id to local one.
+				 * Use a standard write lock here. It might be better to
+				 * disallow access to the table while it's being synchronized.
+				 * But we don't want to block the main apply process from
+				 * working and it has to open the relation in RowExclusiveLock
+				 * when remapping remote relation id to local one.
 				 */
 				rel = heap_open(MyLogicalRepWorker->relid, RowExclusiveLock);
 
 				/*
-				 * Create temporary slot for the sync process. We do this
-				 * inside transaction so that we can use the snapshot made by
-				 * the slot to get existing data.
+				 * Create a temporary slot for the sync process. We do this
+				 * inside the transaction so that we can use the snapshot made
+				 * by the slot to get existing data.
 				 */
 				res = walrcv_exec(wrconn,
 								  "BEGIN READ ONLY ISOLATION LEVEL "
@@ -883,7 +910,7 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 				 * Create new temporary logical decoding slot.
 				 *
 				 * We'll use slot for data copy so make sure the snapshot is
-				 * used for the transaction, that way the COPY will get data
+				 * used for the transaction; that way the COPY will get data
 				 * that is consistent with the lsn used by the slot to start
 				 * decoding.
 				 */
@@ -916,14 +943,15 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 				/* Wait for main apply worker to tell us to catchup. */
 				wait_for_worker_state_change(SUBREL_STATE_CATCHUP);
 
-				/*
+				/*----------
 				 * There are now two possible states here:
 				 * a) Sync is behind the apply.  If that's the case we need to
-				 *    catch up with it by consuming the logical replication
-				 *    stream up to the relstate_lsn.  For that, we exit this
-				 *    function and continue in ApplyWorkerMain().
+				 *	  catch up with it by consuming the logical replication
+				 *	  stream up to the relstate_lsn.  For that, we exit this
+				 *	  function and continue in ApplyWorkerMain().
 				 * b) Sync is caught up with the apply.  So it can just set
-				 *    the state to SYNCDONE and finish.
+				 *	  the state to SYNCDONE and finish.
+				 *----------
 				 */
 				if (*origin_startpos >= MyLogicalRepWorker->relstate_lsn)
 				{
@@ -943,9 +971,12 @@ LogicalRepSyncTableStart(XLogRecPtr *origin_startpos)
 		case SUBREL_STATE_SYNCDONE:
 		case SUBREL_STATE_READY:
 		case SUBREL_STATE_UNKNOWN:
-			/* Nothing to do here but finish.  (UNKNOWN means the relation was
+
+			/*
+			 * Nothing to do here but finish.  (UNKNOWN means the relation was
 			 * removed from pg_subscription_rel before the sync worker could
-			 * start.) */
+			 * start.)
+			 */
 			finish_sync_worker();
 			break;
 		default:

@@ -196,7 +196,8 @@ pg_be_scram_init(const char *username, const char *shadow_pass)
 				 * parsed.
 				 */
 				ereport(LOG,
-						(errmsg("invalid SCRAM verifier for user \"%s\"", username)));
+						(errmsg("invalid SCRAM verifier for user \"%s\"",
+								username)));
 				got_verifier = false;
 			}
 		}
