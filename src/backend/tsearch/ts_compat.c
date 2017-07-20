@@ -2,8 +2,8 @@
 #include "tsearch/ts_type.h"
 
 /*
- * Defition of old WordEntry struct in TSVector. Because of limitations
- * in size (max 1MB for lexemes), the format have changed
+ * Definition of old WordEntry struct in TSVector. Because of limitations
+ * in size (max 1MB for lexemes), the format has changed
  */
 typedef struct
 {
@@ -25,6 +25,12 @@ typedef struct
 #define OLDPOSDATALEN(x,e) ( ( (e)->haspos ) ? (_OLDPOSVECPTR(x,e)->npos) : 0 )
 #define OLDPOSDATAPTR(x,e) (_OLDPOSVECPTR(x,e)->pos)
 
+/*
+ * Converts tsvector with the old structure to current.
+ * @orig - tsvector to convert,
+ * @copy - return copy of tsvector, it has a meaning when tsvector doensn't
+ * need to be converted.
+ */
 TSVector
 tsvector_upgrade(Datum orig, bool copy)
 {
@@ -35,13 +41,22 @@ tsvector_upgrade(Datum orig, bool copy)
 	TSVector   in,
 			   out;
 
-	in = (TSVector) (copy? PG_DETOAST_DATUM_COPY(orig) : PG_DETOAST_DATUM(orig));
+	in = (TSVector) PG_DETOAST_DATUM(orig);
 
 	/* If already in new format, return as is */
 	if (in->size_ & TS_FLAG_STRETCHED)
-		return in;
+	{
+		TSVector out;
 
-	/* calculate required size */
+		if (!copy)
+			return in;
+
+		out = (TSVector) palloc(VARSIZE(in));
+		memcpy(out, in, VARSIZE(in));
+		return out;
+	}
+
+	/* Calculate required size */
 	for (i = 0; i < in->size_; i++)
 	{
 		OldWordEntry *entry = (OldWordEntry *) (in->entries + i);
