@@ -56,7 +56,10 @@ tsvector_upgrade(Datum orig, bool copy)
 		return out;
 	}
 
-	/* Calculate required size */
+	/*
+	 * Calculate required size.
+	 * We don't check any sizes here because old format was limited with 1MB
+	 */
 	for (i = 0; i < in->size_; i++)
 	{
 		OldWordEntry *entry = (OldWordEntry *) (in->entries + i);

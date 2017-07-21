@@ -109,7 +109,6 @@ compareentry(const void *va, const void *vb, void *arg)
 /*
  * Sort an array of WordEntryIN, remove duplicates.
  * *outbuflen receives the amount of space needed for strings and positions.
- * TODO: change to long
  */
 static int
 uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
