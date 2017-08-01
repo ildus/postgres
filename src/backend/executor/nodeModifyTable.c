@@ -1535,9 +1535,10 @@ ExecSetupTransitionCaptureState(ModifyTableState *mtstate, EState *estate)
  *		if needed.
  * ----------------------------------------------------------------
  */
-TupleTableSlot *
-ExecModifyTable(ModifyTableState *node)
+static TupleTableSlot *
+ExecModifyTable(PlanState *pstate)
 {
+	ModifyTableState *node = castNode(ModifyTableState, pstate);
 	EState	   *estate = node->ps.state;
 	CmdType		operation = node->operation;
 	ResultRelInfo *saved_resultRelInfo;
@@ -1550,6 +1551,8 @@ ExecModifyTable(ModifyTableState *node)
 	ItemPointerData tuple_ctid;
 	HeapTupleData oldtupdata;
 	HeapTuple	oldtuple;
+
+	CHECK_FOR_INTERRUPTS();
 
 	/*
 	 * This should NOT get called during EvalPlanQual; we should have passed a
@@ -1804,6 +1807,7 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 	mtstate = makeNode(ModifyTableState);
 	mtstate->ps.plan = (Plan *) node;
 	mtstate->ps.state = estate;
+	mtstate->ps.ExecProcNode = ExecModifyTable;
 
 	mtstate->operation = operation;
 	mtstate->canSetTag = node->canSetTag;
