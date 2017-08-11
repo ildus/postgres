@@ -827,8 +827,7 @@ tsvector_addlexeme(TSVector tsv, int idx, int *dataoff,
 	else
 	{
 		stroff = SHORTALIGN(stroff);
-		\
-			entry->hasoff = 0;
+		entry->hasoff = 0;
 		entry->len = lexeme_len;
 		entry->npos = npos;
 	}
