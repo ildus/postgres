@@ -27,8 +27,7 @@ typedef struct
 
 /*
  * Converts tsvector with the old structure to current.
- * @orig - tsvector to convert,
- * @copy - return copy of tsvector, it has a meaning when tsvector doensn't
+ * Can return copy of tsvector, but it has a meaning when tsvector doensn't
  * need to be converted.
  */
 TSVector
