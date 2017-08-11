@@ -196,7 +196,6 @@ make_tsvector(ParsedText *prs)
 		pfree(prs->words[i].word);
 		if (prs->words[i].alen)
 			pfree(prs->words[i].pos.apos);
-
 	}
 
 	if (prs->words)
