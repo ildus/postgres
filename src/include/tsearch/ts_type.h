@@ -42,15 +42,17 @@
 
 typedef union
 {
-	struct {
-		uint32 hasoff: 1,
-			   offset: 31;
+	struct
+	{
+		uint32		hasoff:1,
+					offset:31;
 	};
-	struct {
-		uint32 hasoff_: 1,
-			   len:11,
-			   npos: 16,
-			   _unused: 4;
+	struct
+	{
+		uint32		hasoff_:1,
+					len:11,
+					npos:16,
+					_unused:4;
 	};
 } WordEntry;
 
@@ -153,7 +155,7 @@ do {													\
  * fmgr interface macros
  */
 
-TSVector tsvector_upgrade(Datum orig, bool copy);
+TSVector	tsvector_upgrade(Datum orig, bool copy);
 
 #define DatumGetTSVector(X)			tsvector_upgrade((X), false)
 #define DatumGetTSVectorCopy(X)		tsvector_upgrade((X), true)
@@ -279,19 +281,19 @@ typedef TSQueryData *TSQuery;
 #define PG_GETARG_TSQUERY_COPY(n)	DatumGetTSQueryCopy(PG_GETARG_DATUM(n))
 #define PG_RETURN_TSQUERY(x)		return TSQueryGetDatum(x)
 
-int tsvector_getoffset(TSVector vec, int idx, WordEntry **we);
+int			tsvector_getoffset(TSVector vec, int idx, WordEntry **we);
 char *tsvector_addlexeme(TSVector tsv, int idx, int *dataoff,
-		char *lexeme, int lexeme_len, WordEntryPos *pos, int npos);
+				   char *lexeme, int lexeme_len, WordEntryPos *pos, int npos);
 
 /* Returns lexeme and its entry by given index from TSVector */
 inline static char *
 tsvector_getlexeme(TSVector vec, int idx, WordEntry **we)
 {
-	Assert(idx >=0 && idx < TS_COUNT(vec));
+	Assert(idx >= 0 && idx < TS_COUNT(vec));
 
 	/*
-	 * we do not allow we == NULL because returned lexeme is not \0 ended,
-	 * and always should be used with we->len
+	 * we do not allow we == NULL because returned lexeme is not \0 ended, and
+	 * always should be used with we->len
 	 */
 	Assert(we != NULL);
 	return STRPTR(vec) + tsvector_getoffset(vec, idx, we);

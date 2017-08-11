@@ -168,7 +168,8 @@ make_tsvector(ParsedText *prs)
 	/* Determine space needed */
 	for (i = 0; i < prs->curwords; i++)
 	{
-		int npos = prs->words[i].alen ? prs->words[i].pos.apos[0] : 0;
+		int			npos = prs->words[i].alen ? prs->words[i].pos.apos[0] : 0;
+
 		INCRSIZE(lenstr, i, prs->words[i].len, npos);
 	}
 
@@ -184,12 +185,13 @@ make_tsvector(ParsedText *prs)
 
 	for (i = 0; i < prs->curwords; i++)
 	{
-		int npos = 0;
+		int			npos = 0;
+
 		if (prs->words[i].alen)
 			npos = prs->words[i].pos.apos[0];
 
 		tsvector_addlexeme(in, i, &stroff, prs->words[i].word, prs->words[i].len,
-			prs->words[i].pos.apos + 1, npos);
+						   prs->words[i].pos.apos + 1, npos);
 
 		pfree(prs->words[i].word);
 		if (prs->words[i].alen)

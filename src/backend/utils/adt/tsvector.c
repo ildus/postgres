@@ -22,9 +22,9 @@
 
 typedef struct
 {
-	WordEntry		entry;			/* must be first! */
-	size_t			offset;			/* offset of lexeme in some buffer */
-	WordEntryPos   *pos;
+	WordEntry	entry;			/* must be first! */
+	size_t		offset;			/* offset of lexeme in some buffer */
+	WordEntryPos *pos;
 } WordEntryIN;
 
 
@@ -96,10 +96,10 @@ compareentry(const void *va, const void *vb, void *arg)
 {
 	const WordEntry *a = (const WordEntry *) va;
 	const WordEntry *b = (const WordEntry *) vb;
-	TSVector	   tsv = (TSVector) arg;
+	TSVector	tsv = (TSVector) arg;
 
-	uint32 offset1 = tsvector_getoffset(tsv, a - ARRPTR(tsv), NULL),
-		   offset2 = tsvector_getoffset(tsv, b - ARRPTR(tsv), NULL);
+	uint32		offset1 = tsvector_getoffset(tsv, a - ARRPTR(tsv), NULL),
+				offset2 = tsvector_getoffset(tsv, b - ARRPTR(tsv), NULL);
 
 	return tsCompareString(STRPTR(tsv) + offset1, ENTRY_LEN(tsv, a),
 						   STRPTR(tsv) + offset2, ENTRY_LEN(tsv, b),
@@ -158,7 +158,7 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 			if (res->entry.npos)
 			{
 				/* append ptr's positions to res's positions */
-				int newlen = ptr->entry.npos + res->entry.npos;
+				int			newlen = ptr->entry.npos + res->entry.npos;
 
 				res->pos = (WordEntryPos *)
 					repalloc(res->pos, newlen * sizeof(WordEntryPos));
@@ -196,7 +196,7 @@ uniqueentry(WordEntryIN *a, int l, char *buf, int *outbuflen)
 	}
 
 	*outbuflen = buflen;
-	return res + 1 -a;
+	return res + 1 - a;
 }
 
 Datum
@@ -266,7 +266,7 @@ tsvectorin(PG_FUNCTION_ARGS)
 		arr[len].entry.len = toklen;
 		arr[len].offset = cur - tmpbuf;
 		arr[len].entry.npos = poslen;
-		arr[len].pos = (poslen != 0)? pos : NULL;
+		arr[len].pos = (poslen != 0) ? pos : NULL;
 		memcpy((void *) cur, (void *) token, toklen);
 		cur += toklen;
 		len++;
@@ -292,7 +292,7 @@ tsvectorin(PG_FUNCTION_ARGS)
 	for (i = 0; i < len; i++)
 	{
 		tsvector_addlexeme(in, i, &stroff, &tmpbuf[arr[i].offset],
-				arr[i].entry.len, arr[i].pos, arr[i].entry.npos);
+						   arr[i].entry.len, arr[i].pos, arr[i].entry.npos);
 
 		if (arr[i].entry.npos)
 			pfree(arr[i].pos);
@@ -320,7 +320,8 @@ tsvectorout(PG_FUNCTION_ARGS)
 	lenbuf = tscount * 2 /* '' */ + tscount - 1 /* space */ + 2 /* \0 */ ;
 	for (i = 0; i < tscount; i++)
 	{
-		int npos = ENTRY_NPOS(out, ptr + i);
+		int			npos = ENTRY_NPOS(out, ptr + i);
+
 		lenbuf += ENTRY_LEN(out, ptr + i) * 2 * pg_database_encoding_max_length() /* for escape */ ;
 		if (npos)
 			lenbuf += 1 /* : */ + 7 /* int2 + , + weight */ * npos;
@@ -331,8 +332,8 @@ tsvectorout(PG_FUNCTION_ARGS)
 	INITPOS(pos);
 	for (i = 0; i < tscount; i++)
 	{
-		int		lex_len = ENTRY_LEN(out, ptr),
-				npos = ENTRY_NPOS(out, ptr);
+		int			lex_len = ENTRY_LEN(out, ptr),
+					npos = ENTRY_NPOS(out, ptr);
 
 		curbegin = curin = STRPTR(out) + pos;
 		if (i != 0)
@@ -420,9 +421,9 @@ tsvectorsend(PG_FUNCTION_ARGS)
 	INITPOS(pos);
 	for (i = 0; i < TS_COUNT(vec); i++)
 	{
-		char   *lexeme	= STRPTR(vec) + pos;
-		int		npos	= ENTRY_NPOS(vec, weptr),
-				lex_len = ENTRY_LEN(vec, weptr);
+		char	   *lexeme = STRPTR(vec) + pos;
+		int			npos = ENTRY_NPOS(vec, weptr),
+					lex_len = ENTRY_LEN(vec, weptr);
 
 		/*
 		 * the strings in the TSVector array are not null-terminated, so we
@@ -508,15 +509,15 @@ tsvectorrecv(PG_FUNCTION_ARGS)
 		}
 
 		if (prev_lexeme && tsCompareString(lexeme, lex_len,
-						prev_lexeme, prev_lex_len, false) <= 0)
+										   prev_lexeme, prev_lex_len, false) <= 0)
 			needSort = true;
 
 		lexeme_out = tsvector_addlexeme(vec, i, &datalen, lexeme,
-				lex_len, NULL, npos);
+										lex_len, NULL, npos);
 		if (npos > 0)
 		{
-			WordEntryPos   *wepptr;
-			int				j;
+			WordEntryPos *wepptr;
+			int			j;
 
 			wepptr = POSDATAPTR(lexeme_out, lex_len);
 			for (j = 0; j < npos; j++)

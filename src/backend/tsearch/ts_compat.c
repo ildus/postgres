@@ -11,13 +11,13 @@ typedef struct
 				haspos:1,
 				len:11,
 				pos:20;
-} OldWordEntry;
+}			OldWordEntry;
 
 typedef struct
 {
 	uint16		npos;
 	WordEntryPos pos[FLEXIBLE_ARRAY_MEMBER];
-} OldWordEntryPosVector;
+}			OldWordEntryPosVector;
 
 #define OLDSTRPTR(x)	( (char *) &(x)->entries[x->size_] )
 #define _OLDPOSVECPTR(x, e)	\
@@ -33,19 +33,19 @@ typedef struct
 TSVector
 tsvector_upgrade(Datum orig, bool copy)
 {
-	int	       i,
-	           dataoff = 0,
-			   datalen = 0,
-			   totallen;
-	TSVector   in,
-			   out;
+	int			i,
+				dataoff = 0,
+				datalen = 0,
+				totallen;
+	TSVector	in,
+				out;
 
 	in = (TSVector) PG_DETOAST_DATUM(orig);
 
 	/* If already in new format, return as is */
 	if (in->size_ & TS_FLAG_STRETCHED)
 	{
-		TSVector out;
+		TSVector	out;
 
 		if (!copy)
 			return in;
@@ -56,12 +56,13 @@ tsvector_upgrade(Datum orig, bool copy)
 	}
 
 	/*
-	 * Calculate required size.
-	 * We don't check any sizes here because old format was limited with 1MB
+	 * Calculate required size. We don't check any sizes here because old
+	 * format was limited with 1MB
 	 */
 	for (i = 0; i < in->size_; i++)
 	{
 		OldWordEntry *entry = (OldWordEntry *) (in->entries + i);
+
 		INCRSIZE(datalen, i, entry->len, OLDPOSDATALEN(in, entry));
 	}
 
@@ -73,9 +74,10 @@ tsvector_upgrade(Datum orig, bool copy)
 	for (i = 0; i < in->size_; i++)
 	{
 		OldWordEntry *entry = (OldWordEntry *) (in->entries + i);
+
 		tsvector_addlexeme(out, i, &dataoff,
-				OLDSTRPTR(in) + entry->pos, entry->len,
-				OLDPOSDATAPTR(in, entry), OLDPOSDATALEN(in, entry));
+						   OLDSTRPTR(in) + entry->pos, entry->len,
+						   OLDPOSDATAPTR(in, entry), OLDPOSDATALEN(in, entry));
 	}
 
 	return out;

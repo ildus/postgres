@@ -53,12 +53,13 @@ word_distance(int32 w)
 static int
 cnt_length(TSVector t)
 {
-	int		i,
-			len = 0;
+	int			i,
+				len = 0;
 
 	for (i = 0; i < TS_COUNT(t); i++)
 	{
-		WordEntry *entry = UNWRAP_ENTRY(t, ARRPTR(t) + i);
+		WordEntry  *entry = UNWRAP_ENTRY(t, ARRPTR(t) + i);
+
 		Assert(!entry->hasoff);
 		len += (entry->npos == 0) ? 1 : entry->npos;
 	}
@@ -79,12 +80,12 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 	tsCompareString((q) + (i)->distance, (i)->length,	\
 					s, l, (m))
 
-	int StopLow = 0;
-	int StopHigh = TS_COUNT(t);
-	int StopMiddle = StopHigh;
-	int	difference;
-	char *lexeme;
-	WordEntry *we;
+	int			StopLow = 0;
+	int			StopHigh = TS_COUNT(t);
+	int			StopMiddle = StopHigh;
+	int			difference;
+	char	   *lexeme;
+	WordEntry  *we;
 
 	*nitem = 0;
 
@@ -96,7 +97,7 @@ find_wordentry(TSVector t, TSQuery q, QueryOperand *item, int32 *nitem)
 
 		Assert(!we->hasoff);
 		difference = WordECompareQueryItem(lexeme, we->len,
-			GETOPERAND(q), item, false);
+										   GETOPERAND(q), item, false);
 
 		if (difference == 0)
 		{
@@ -205,7 +206,7 @@ static float
 calc_rank_and(const float *w, TSVector t, TSQuery q)
 {
 	WordEntryPos **pos;
-	uint16 *npos;
+	uint16	   *npos;
 	WordEntryPos posnull[1] = {0};
 	int			i,
 				k,
@@ -235,8 +236,8 @@ calc_rank_and(const float *w, TSVector t, TSQuery q)
 
 	for (i = 0; i < size; i++)
 	{
-		int   idx = find_wordentry(t, q, item[i], &nitem),
-			  firstidx;
+		int			idx = find_wordentry(t, q, item[i], &nitem),
+					firstidx;
 
 		if (idx == -1)
 			continue;
@@ -245,9 +246,9 @@ calc_rank_and(const float *w, TSVector t, TSQuery q)
 
 		while (idx - firstidx < nitem)
 		{
-			WordEntry *entry;
+			WordEntry  *entry;
 
-			char *lexeme = tsvector_getlexeme(t, idx, &entry);
+			char	   *lexeme = tsvector_getlexeme(t, idx, &entry);
 
 			Assert(!entry->hasoff);
 			if (entry->npos)
@@ -315,10 +316,11 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 
 	for (i = 0; i < size; i++)
 	{
-		int         idx  , firstidx;
+		int			idx,
+					firstidx;
 		float		resj,
 					wjm;
-		int32       jm;
+		int32		jm;
 
 		idx = find_wordentry(t, q, item[i], &nitem);
 		if (idx == -1)
@@ -328,8 +330,8 @@ calc_rank_or(const float *w, TSVector t, TSQuery q)
 
 		while (idx - firstidx < nitem)
 		{
-			WordEntry *entry;
-			char *lexeme = tsvector_getlexeme(t, idx, &entry);
+			WordEntry  *entry;
+			char	   *lexeme = tsvector_getlexeme(t, idx, &entry);
 
 			Assert(!entry->hasoff);
 			if (entry->npos)
@@ -759,10 +761,10 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 	 */
 	for (i = 0; i < qr->query->size; i++)
 	{
-		int				idx,
-						firstidx;
-		QueryOperand   *curoperand;
-		WordEntryPos   *post;
+		int			idx,
+					firstidx;
+		QueryOperand *curoperand;
+		WordEntryPos *post;
 
 		if (item[i].type != QI_VAL)
 			continue;
@@ -778,8 +780,8 @@ get_docrep(TSVector txt, QueryRepresentation *qr, int *doclen)
 		/* iterations over entries in tsvector */
 		while (idx - firstidx < nitem)
 		{
-			WordEntry	*entry;
-			char		*lex = tsvector_getlexeme(txt, idx, &entry);
+			WordEntry  *entry;
+			char	   *lex = tsvector_getlexeme(txt, idx, &entry);
 
 			Assert(!entry->hasoff);
 			if (entry->npos)
