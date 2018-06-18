@@ -2992,6 +2992,7 @@ CopyFrom(CopyState cstate)
 	 */
 	ExecBSInsertTriggers(estate, resultRelInfo);
 
+	bistate = GetBulkInsertState(NULL);
 	econtext = GetPerTupleExprContext(estate);
 
 	/* Set up callback to identify error line number */
