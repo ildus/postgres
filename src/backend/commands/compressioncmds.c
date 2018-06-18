@@ -36,6 +36,9 @@
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 
+/* Set by pg_upgrade_support functions */
+Oid			binary_upgrade_next_attr_compression_oid = InvalidOid;
+
 /*
  * When conditions of compression satisfies one if builtin attribute
  * compresssion tuples the compressed attribute will be linked to
@@ -129,11 +132,12 @@ lookup_attribute_compression(Oid attrelid, AttrNumber attnum,
 					tup_amoid;
 		Datum		values[Natts_pg_attr_compression];
 		bool		nulls[Natts_pg_attr_compression];
+		char	   *amname;
 
 		heap_deform_tuple(tuple, RelationGetDescr(rel), values, nulls);
 		acoid = DatumGetObjectId(values[Anum_pg_attr_compression_acoid - 1]);
-		tup_amoid = get_am_oid(
-							   NameStr(*DatumGetName(values[Anum_pg_attr_compression_acname - 1])), false);
+		amname = NameStr(*DatumGetName(values[Anum_pg_attr_compression_acname - 1]));
+		tup_amoid = get_am_oid(amname, false);
 
 		if (previous_amoids)
 			*previous_amoids = list_append_unique_oid(*previous_amoids, tup_amoid);
@@ -150,17 +154,15 @@ lookup_attribute_compression(Oid attrelid, AttrNumber attnum,
 			if (DatumGetPointer(acoptions) == NULL)
 				result = acoid;
 		}
-		else
+		else if (DatumGetPointer(acoptions) != NULL)
 		{
 			bool		equal;
 
 			/* check if arrays for WITH options are equal */
 			equal = DatumGetBool(CallerFInfoFunctionCall2(
-														  array_eq,
-														  &arrayeq_info,
-														  InvalidOid,
-														  acoptions,
-														  values[Anum_pg_attr_compression_acoptions - 1]));
+						array_eq, &arrayeq_info, InvalidOid, acoptions,
+						values[Anum_pg_attr_compression_acoptions - 1]));
+
 			if (equal)
 				result = acoid;
 		}
@@ -227,6 +229,16 @@ CreateAttributeCompression(Form_pg_attribute att,
 	/* Try to find builtin compression first */
 	acoid = lookup_attribute_compression(0, 0, amoid, arropt, NULL);
 
+	/* no rewrite by default */
+	if (need_rewrite != NULL)
+		*need_rewrite = false;
+
+	if (IsBinaryUpgrade)
+	{
+		/* Skip the rewrite checks and searching of identical compression */
+		goto add_tuple;
+	}
+
 	/*
 	 * attrelid will be invalid on CREATE TABLE, no need for table rewrite
 	 * check.
@@ -252,16 +264,10 @@ CreateAttributeCompression(Form_pg_attribute att,
 		 */
 		if (need_rewrite != NULL)
 		{
-			/* no rewrite by default */
-			*need_rewrite = false;
-
 			Assert(preserved_amoids != NULL);
 
 			if (compression->preserve == NIL)
-			{
-				Assert(!IsBinaryUpgrade);
 				*need_rewrite = true;
-			}
 			else
 			{
 				ListCell   *cell;
@@ -294,7 +300,7 @@ CreateAttributeCompression(Form_pg_attribute att,
 				 * In binary upgrade list will not be free since it contains
 				 * Oid of builtin compression access method.
 				 */
-				if (!IsBinaryUpgrade && list_length(previous_amoids) != 0)
+				if (list_length(previous_amoids) != 0)
 					*need_rewrite = true;
 			}
 		}
@@ -302,9 +308,6 @@ CreateAttributeCompression(Form_pg_attribute att,
 		/* Cleanup */
 		list_free(previous_amoids);
 	}
-
-	if (IsBinaryUpgrade && !OidIsValid(acoid))
-		elog(ERROR, "could not restore attribute compression data");
 
 	/* Return Oid if we already found identical compression on this column */
 	if (OidIsValid(acoid))
@@ -315,6 +318,7 @@ CreateAttributeCompression(Form_pg_attribute att,
 		return acoid;
 	}
 
+add_tuple:
 	/* Initialize buffers for new tuple values */
 	memset(values, 0, sizeof(values));
 	memset(nulls, false, sizeof(nulls));
@@ -323,13 +327,27 @@ CreateAttributeCompression(Form_pg_attribute att,
 
 	rel = heap_open(AttrCompressionRelationId, RowExclusiveLock);
 
-	acoid = GetNewOidWithIndex(rel, AttrCompressionIndexId,
-							   Anum_pg_attr_compression_acoid);
+	if (IsBinaryUpgrade)
+	{
+		/* acoid should be found in some cases */
+		if (binary_upgrade_next_attr_compression_oid < FirstNormalObjectId &&
+			(!OidIsValid(acoid) || binary_upgrade_next_attr_compression_oid != acoid))
+			elog(ERROR, "could not link to built-in attribute compression");
+
+		acoid = binary_upgrade_next_attr_compression_oid;
+	}
+	else
+	{
+		acoid = GetNewOidWithIndex(rel, AttrCompressionIndexId,
+									Anum_pg_attr_compression_acoid);
+
+	}
+
 	if (acoid < FirstNormalObjectId)
 	{
-		/* this is database initialization */
+		/* this is built-in attribute compression */
 		heap_close(rel, RowExclusiveLock);
-		return DefaultCompressionOid;
+		return acoid;
 	}
 
 	/* we need routine only to call cmcheck function */
@@ -390,8 +408,8 @@ RemoveAttributeCompression(Oid acoid)
 /*
  * CleanupAttributeCompression
  *
- * Remove entries in pg_attr_compression except current attribute compression
- * and related with specified list of access methods.
+ * Remove entries in pg_attr_compression of the column except current
+ * attribute compression and related with specified list of access methods.
  */
 void
 CleanupAttributeCompression(Oid relid, AttrNumber attnum, List *keepAmOids)
@@ -419,9 +437,7 @@ CleanupAttributeCompression(Oid relid, AttrNumber attnum, List *keepAmOids)
 	ReleaseSysCache(attrtuple);
 
 	Assert(relid > 0 && attnum > 0);
-
-	if (IsBinaryUpgrade)
-		goto builtin_removal;
+	Assert(!IsBinaryUpgrade);
 
 	rel = heap_open(AttrCompressionRelationId, RowExclusiveLock);
 
@@ -438,7 +454,10 @@ CleanupAttributeCompression(Oid relid, AttrNumber attnum, List *keepAmOids)
 	scan = systable_beginscan(rel, AttrCompressionRelidAttnumIndexId,
 							  true, NULL, 2, key);
 
-	/* Remove attribute compression tuples and collect removed Oids to list */
+	/*
+	 * Remove attribute compression tuples and collect removed Oids
+	 * to list.
+	 */
 	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
 	{
 		Form_pg_attr_compression acform;
@@ -460,7 +479,10 @@ CleanupAttributeCompression(Oid relid, AttrNumber attnum, List *keepAmOids)
 	systable_endscan(scan);
 	heap_close(rel, RowExclusiveLock);
 
-	/* Now remove dependencies */
+	/*
+	 * Now remove dependencies between attribute compression (dependent)
+	 * and column.
+	 */
 	rel = heap_open(DependRelationId, RowExclusiveLock);
 	foreach(lc, removed)
 	{

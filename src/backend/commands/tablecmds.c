@@ -831,10 +831,10 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 		if (colDef->generated)
 			attr->attgenerated = colDef->generated;
 
-		if (relkind == RELKIND_RELATION || relkind == RELKIND_PARTITIONED_TABLE)
+		if (!IsBinaryUpgrade &&
+			(relkind == RELKIND_RELATION || relkind == RELKIND_PARTITIONED_TABLE))
 			attr->attcompression = CreateAttributeCompression(attr,
-															  colDef->compression,
-															  NULL, NULL);
+										colDef->compression, NULL, NULL);
 		else
 			attr->attcompression = InvalidOid;
 	}
@@ -14431,14 +14431,6 @@ ATExecSetCompression(AlteredTableInfo *tab,
 
 	/* make changes visible */
 	CommandCounterIncrement();
-
-	/*
-	 * Normally cleanup is done in rewrite but in binary upgrade we should do
-	 * it explicitly.
-	 */
-	if (IsBinaryUpgrade)
-		CleanupAttributeCompression(RelationGetRelid(rel),
-									attnum, preserved_amoids);
 
 	ObjectAddressSet(address, AttrCompressionRelationId, acoid);
 	return address;

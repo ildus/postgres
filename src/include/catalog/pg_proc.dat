@@ -10100,6 +10100,10 @@
   proname => 'binary_upgrade_set_missing_value', provolatile => 'v',
   proparallel => 'u', prorettype => 'void', proargtypes => 'oid text text',
   prosrc => 'binary_upgrade_set_missing_value' },
+{ oid => '4012', descr => 'for use by pg_upgrade',
+  proname => 'binary_upgrade_set_next_attr_compression_oid', provolatile => 'v',
+  proparallel => 'r', prorettype => 'void', proargtypes => 'oid',
+  prosrc => 'binary_upgrade_set_next_attr_compression_oid' },
 
 # conversion functions
 { oid => '4300',
