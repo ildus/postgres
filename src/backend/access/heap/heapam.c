@@ -2089,8 +2089,9 @@ heap_prepare_insert(Relation relation, HeapTuple tup, TransactionId xid,
 		Assert(!HeapTupleHasExternal(tup));
 		return tup;
 	}
-	else if (HeapTupleHasExternal(tup) || tup->t_len > TOAST_TUPLE_THRESHOLD)
-		return toast_insert_or_update(relation, tup, NULL, options);
+	else if (HeapTupleHasExternal(tup)
+			 || tup->t_len > TOAST_TUPLE_THRESHOLD)
+		return toast_insert_or_update(relation, tup, NULL, options, NULL);
 	else
 		return tup;
 }
@@ -3508,7 +3509,7 @@ l2:
 		if (need_toast)
 		{
 			/* Note we always use WAL and FSM during updates */
-			heaptup = toast_insert_or_update(relation, newtup, &oldtup, 0);
+			heaptup = toast_insert_or_update(relation, newtup, &oldtup, 0, NULL);
 			newtupsize = MAXALIGN(heaptup->t_len);
 		}
 		else
