@@ -475,6 +475,7 @@ typedef enum NodeTag
 	T_PartitionBoundSpec,
 	T_PartitionRangeDatum,
 	T_PartitionCmd,
+	T_ColumnCompression,
 	T_VacuumRelation,
 
 	/*
