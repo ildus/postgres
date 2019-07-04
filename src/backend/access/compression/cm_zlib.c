@@ -246,6 +246,7 @@ zlibhandler(PG_FUNCTION_ARGS)
 	routine->cminitstate = zlib_cminitstate;
 	routine->cmcompress = zlib_cmcompress;
 	routine->cmdecompress = zlib_cmdecompress;
+	routine->cmdecompress_slice = NULL;
 
 	PG_RETURN_POINTER(routine);
 #endif

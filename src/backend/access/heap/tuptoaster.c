@@ -2450,7 +2450,7 @@ toast_decompress_datum(struct varlena *attr)
 		rawsize = pglz_decompress(TOAST_COMPRESS_RAWDATA(attr),
 							VARSIZE(attr) - TOAST_COMPRESS_HDRSZ,
 							VARDATA(result),
-							TOAST_COMPRESS_RAWSIZE(attr));
+							TOAST_COMPRESS_RAWSIZE(attr), true);
 		if (rawsize < 0)
 			elog(ERROR, "compressed data is corrupted");
 
@@ -2482,7 +2482,10 @@ toast_decompress_datum_slice(struct varlena *attr, int32 slicelength)
 
 		hdr = (toast_compress_header_custom *) attr;
 		cmoptions = lookup_compression_am_options(hdr->cmid);
-		result = cmoptions->amroutine->cmdecompress_slice(cmoptions, attr, slicelength);
+		if (cmoptions->amroutine->cmdecompress_slice)
+			result = cmoptions->amroutine->cmdecompress_slice(cmoptions, attr, slicelength);
+		else
+			result = cmoptions->amroutine->cmdecompress(cmoptions, attr);
 	}
 	else
 	{

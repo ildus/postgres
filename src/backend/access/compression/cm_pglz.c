@@ -135,19 +135,43 @@ static struct varlena *
 pglz_cmdecompress(CompressionAmOptions *cmoptions, const struct varlena *value)
 {
 	struct varlena *result;
-	int32		resultlen;
+	int32		rawsize;
 
 	Assert(VARATT_IS_CUSTOM_COMPRESSED(value));
-	resultlen = VARRAWSIZE_4B_C(value) + VARHDRSZ;
-	result = (struct varlena *) palloc(resultlen);
+	result = (struct varlena *) palloc(VARRAWSIZE_4B_C(value) + VARHDRSZ);
 
 	SET_VARSIZE(result, resultlen);
-	if (pglz_decompress((char *) value + VARHDRSZ_CUSTOM_COMPRESSED,
+	rawsize = pglz_decompress((char *) value + VARHDRSZ_CUSTOM_COMPRESSED,
 						VARSIZE(value) - VARHDRSZ_CUSTOM_COMPRESSED,
 						VARDATA(result),
-						VARRAWSIZE_4B_C(value)) < 0)
+						VARRAWSIZE_4B_C(value), true);
+
+    if (rawsize < 0)
 		elog(ERROR, "pglz: compressed data is corrupted");
 
+	SET_VARSIZE(result, rawsize);
+	return result;
+}
+
+static struct varlena *
+pglz_cmdecompress_slice(CompressionAmOptions *cmoptions, const struct varlena *value,
+                            int32 slicelength)
+{
+	struct varlena *result;
+	int32		rawsize;
+
+	Assert(VARATT_IS_CUSTOM_COMPRESSED(value));
+	result = (struct varlena *) palloc(VARRAWSIZE_4B_C(value) + VARHDRSZ);
+
+	rawsize = pglz_decompress((char *) value + VARHDRSZ_CUSTOM_COMPRESSED,
+						VARSIZE(value) - VARHDRSZ_CUSTOM_COMPRESSED,
+						VARDATA(result),
+                        slicelength, false);
+
+    if (rawsize < 0)
+		elog(ERROR, "pglz: compressed data is corrupted");
+
+	SET_VARSIZE(result, rawsize);
 	return result;
 }
 
@@ -161,6 +185,7 @@ pglzhandler(PG_FUNCTION_ARGS)
 	routine->cminitstate = pglz_cminitstate;
 	routine->cmcompress = pglz_cmcompress;
 	routine->cmdecompress = pglz_cmdecompress;
+	routine->cmdecompress_slice = pglz_cmdecompress_slice;
 
 	PG_RETURN_POINTER(routine);
 }

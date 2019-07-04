@@ -46,6 +46,9 @@ typedef struct CompressionAmOptions
 typedef void (*cmcheck_function) (Form_pg_attribute att, List *options);
 typedef struct varlena *(*cmcompress_function)
 			(CompressionAmOptions *cmoptions, const struct varlena *value);
+typedef struct varlena *(*cmdecompress_slice_function)
+			(CompressionAmOptions *cmoptions, const struct varlena *value,
+             int32 slicelength);
 typedef void *(*cminitstate_function) (Oid acoid, List *options);
 
 /*
@@ -70,6 +73,7 @@ struct CompressionAmRoutine
 	cminitstate_function cminitstate;	/* can be NULL */
 	cmcompress_function cmcompress;
 	cmcompress_function cmdecompress;
+	cmdecompress_slice_function cmdecompress_slice;
 };
 
 /* access/compression/cmapi.c */
