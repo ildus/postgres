@@ -134,7 +134,7 @@ INSERT INTO cmtest VALUES(repeat('1234567890',1001));
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    1259 |        1 |       4189 |           0 | n
+    1259 |        1 |       5555 |           0 | n
 (1 row)
 
 -- check decompression
@@ -178,8 +178,8 @@ SELECT pg_column_compression('cmtest', 'f1');
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    1259 |        1 |       4189 |           0 | n
-    4189 |        0 |       1259 |           1 | i
+    1259 |        1 |       5555 |           0 | n
+    5555 |        0 |       1259 |           1 | i
 (2 rows)
 
 -- rewrite
@@ -204,8 +204,8 @@ SELECT pg_column_compression('cmtest', 'f1');
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    4189 |        0 |       1259 |           1 | i
-    4189 |        0 |       1259 |           1 | i
+    5555 |        0 |       1259 |           1 | i
+    5555 |        0 |       1259 |           1 | i
 (2 rows)
 
 -- rewrite
@@ -231,7 +231,7 @@ SELECT pg_column_compression('cmtest', 'f1');
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    1259 |        1 |       4189 |           0 | n
+    1259 |        1 |       5555 |           0 | n
 (1 row)
 
 -- no rewrites
@@ -244,9 +244,9 @@ INSERT INTO cmtest VALUES(repeat('1234567890',1006));
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    1259 |        1 |       4189 |           0 | n
-    4189 |        0 |       1259 |           1 | i
-    4189 |        0 |       1259 |           1 | i
+    1259 |        1 |       5555 |           0 | n
+    5555 |        0 |       1259 |           1 | i
+    5555 |        0 |       1259 |           1 | i
 (3 rows)
 
 -- remove function and related event trigger

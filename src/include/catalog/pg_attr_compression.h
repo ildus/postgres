@@ -25,7 +25,7 @@
  *		typedef struct FormData_pg_attr_compression
  * ----------------
  */
-CATALOG(pg_attr_compression,4189,AttrCompressionRelationId)
+CATALOG(pg_attr_compression,5555,AttrCompressionRelationId)
 {
 	Oid			acoid;						/* attribute compression oid */
 	NameData	acname;						/* name of compression AM */
