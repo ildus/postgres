@@ -597,16 +597,10 @@
    The catalog <structname>pg_am</structname> stores information about
    relation access methods.  There is one row for each access method supported
    by the system.
-<<<<<<< HEAD
-   Currently, only tables and indexes have access methods. The requirements for table
-   and index access methods are discussed in detail in <xref linkend="tableam"/> and
-   <xref linkend="indexam"/> respectively.
-=======
-   Currently, compression and index access methods are supported.
-   The requirements for index access methods are discussed in detail
-   in <xref linkend="indexam"/>, for compression access methods
-   could be found in <xref linkend="compression-am"/>.
->>>>>>> Add documentation for custom compression methods
+   Currently, there are tables, indexes and compression access methods.
+   The requirements for table, index and compression access methods
+   are discussed in detail in <xref linkend="tableam"/>,
+   <xref linkend="indexam"/> and <xref linkend="compression-am"/> respectively.
   </para>
 
   <table>
