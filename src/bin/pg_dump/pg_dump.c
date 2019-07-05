@@ -12863,6 +12863,7 @@ dumpAccessMethod(Archive *fout, AccessMethodInfo *aminfo)
 			break;
 		case AMTYPE_TABLE:
 			appendPQExpBufferStr(q, "TYPE TABLE ");
+            break;
 		case AMTYPE_COMPRESSION:
 			appendPQExpBufferStr(q, "TYPE COMPRESSION ");
 			break;
