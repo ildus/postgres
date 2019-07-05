@@ -140,7 +140,6 @@ pglz_cmdecompress(CompressionAmOptions *cmoptions, const struct varlena *value)
 	Assert(VARATT_IS_CUSTOM_COMPRESSED(value));
 	result = (struct varlena *) palloc(VARRAWSIZE_4B_C(value) + VARHDRSZ);
 
-	SET_VARSIZE(result, resultlen);
 	rawsize = pglz_decompress((char *) value + VARHDRSZ_CUSTOM_COMPRESSED,
 						VARSIZE(value) - VARHDRSZ_CUSTOM_COMPRESSED,
 						VARDATA(result),

@@ -8669,10 +8669,9 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			int			i_curattnum;
 			int			start;
 
-			if (g_verbose)
-				write_msg(NULL, "finding compression info for table \"%s.%s\"\n",
-						  tbinfo->dobj.namespace->dobj.name,
-						  tbinfo->dobj.name);
+			pg_log_info("finding compression info for table \"%s.%s\"",
+						tbinfo->dobj.namespace->dobj.name,
+						tbinfo->dobj.name);
 
 			tbinfo->attcompression = pg_malloc0(tbinfo->numatts * sizeof(AttrCompressionInfo *));
 
@@ -15821,6 +15820,25 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 										  tbinfo->atttypnames[j]);
 					}
 
+					/*
+					 * Compression
+					 *
+					 * In binary-upgrade mode, compression is assigned by
+					 * ALTER. Even if we're skipping compression the attribute
+					 * will get default compression. It's the task for ALTER
+					 * command to restore compression info.
+					 */
+					if (!dopt->no_compression_methods && !dopt->binary_upgrade &&
+						tbinfo->attcmnames[j] && strlen(tbinfo->attcmnames[j]) &&
+						has_custom_compression)
+					{
+						appendPQExpBuffer(q, " COMPRESSION %s",
+										  tbinfo->attcmnames[j]);
+						if (nonemptyReloptions(tbinfo->attcmoptions[j]))
+							appendPQExpBuffer(q, " WITH (%s)",
+											  tbinfo->attcmoptions[j]);
+					}
+
 					if (print_default)
 					{
 						if (tbinfo->attgenerated[j] == ATTRIBUTE_GENERATED_STORED)
@@ -15845,32 +15863,6 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 							appendPQExpBuffer(q, " COLLATE %s",
 											  fmtQualifiedDumpable(coll));
 					}
-
-					/*
-					 * Compression
-					 *
-					 * In binary-upgrade mode, compression is assigned by
-					 * ALTER. Even if we're skipping compression the attribute
-					 * will get default compression. It's the task for ALTER
-					 * command to restore compression info.
-					 */
-					if (!dopt->no_compression_methods && !dopt->binary_upgrade &&
-						tbinfo->attcmnames[j] && strlen(tbinfo->attcmnames[j]) &&
-						has_custom_compression)
-					{
-						appendPQExpBuffer(q, " COMPRESSION %s",
-										  tbinfo->attcmnames[j]);
-						if (nonemptyReloptions(tbinfo->attcmoptions[j]))
-							appendPQExpBuffer(q, " WITH (%s)",
-											  tbinfo->attcmoptions[j]);
-					}
-
-					if (has_default)
-						appendPQExpBuffer(q, " DEFAULT %s",
-										  tbinfo->attrdefs[j]->adef_expr);
-
-					if (has_notnull)
-						appendPQExpBufferStr(q, " NOT NULL");
 				}
 			}
 

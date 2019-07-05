@@ -2443,6 +2443,8 @@ toast_decompress_datum(struct varlena *attr)
 	}
 	else
 	{
+		int		rawsize;
+
 		result = (struct varlena *)
 			palloc(TOAST_COMPRESS_RAWSIZE(attr) + VARHDRSZ);
 		SET_VARSIZE(result, TOAST_COMPRESS_RAWSIZE(attr) + VARHDRSZ);
