@@ -22,11 +22,12 @@
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
-#include "catalog/pg_attr_compression.h"
-#include "catalog/pg_am.h"
+#include "catalog/pg_attr_compression_d.h"
+#include "catalog/pg_am_d.h"
+#include "catalog/pg_collation_d.h"
 #include "catalog/pg_depend.h"
-#include "catalog/pg_proc.h"
-#include "catalog/pg_type.h"
+#include "catalog/pg_proc_d.h"
+#include "catalog/pg_type_d.h"
 #include "commands/defrem.h"
 #include "parser/parse_func.h"
 #include "utils/builtins.h"
@@ -160,7 +161,7 @@ lookup_attribute_compression(Oid attrelid, AttrNumber attnum,
 
 			/* check if arrays for WITH options are equal */
 			equal = DatumGetBool(CallerFInfoFunctionCall2(
-						array_eq, &arrayeq_info, InvalidOid, acoptions,
+						array_eq, &arrayeq_info, DEFAULT_COLLATION_OID, acoptions,
 						values[Anum_pg_attr_compression_acoptions - 1]));
 
 			if (equal)

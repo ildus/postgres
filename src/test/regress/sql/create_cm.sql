@@ -14,10 +14,10 @@ CREATE ACCESS METHOD pglz1 TYPE COMPRESSION HANDLER pglzhandler;
 CREATE ACCESS METHOD pglz2 TYPE COMPRESSION HANDLER pglzhandler;
 CREATE TABLE cmaltertest (f1 TEXT COMPRESSION pglz2);
 SELECT acname, acattnum, acoptions FROM pg_attr_compression
-	WHERE acrelid = 'cmaltertest'::regclass;
+	WHERE acrelid = 'cmaltertest'::REGCLASS;
 ALTER TABLE cmaltertest DROP COLUMN f1;
 SELECT acname, acattnum, acoptions FROM pg_attr_compression
-	WHERE acrelid = 'cmaltertest'::regclass;
+	WHERE acrelid = 'cmaltertest'::REGCLASS;
 DROP TABLE cmaltertest;
 
 -- test drop
@@ -31,7 +31,7 @@ ALTER TABLE cmaltertest ALTER COLUMN at1 SET DATA TYPE INT USING at1::INTEGER;
 \d+ cmaltertest
 SELECT pg_column_compression('cmaltertest', 'at1');
 SELECT acname, acattnum, acoptions FROM pg_attr_compression
-	WHERE acrelid = 'cmaltertest'::regclass;
+	WHERE acrelid = 'cmaltertest'::REGCLASS;
 ALTER TABLE cmaltertest ALTER COLUMN at1 SET DATA TYPE TEXT;
 SELECT pg_column_compression('cmaltertest', 'at1');
 DROP TABLE cmaltertest;
@@ -61,8 +61,9 @@ CREATE TABLE cmtest(f1 TEXT);
 CREATE VIEW cmtest_deps AS
 	SELECT classid, objsubid, refclassid, refobjsubid, deptype
 	FROM pg_depend
-	WHERE (refclassid = 4001 OR classid = 4001) AND
-		  (objid = 'cmtest'::regclass OR refobjid = 'cmtest'::regclass)
+	WHERE (refclassid = 'pg_catalog.pg_attr_compression'::REGCLASS OR
+            classid = 'pg_catalog.pg_attr_compression'::REGCLASS) AND
+		  (objid = 'cmtest'::REGCLASS OR refobjid = 'cmtest'::REGCLASS)
 	ORDER by objid, refobjid;
 INSERT INTO cmtest VALUES(repeat('1234567890',1001));
 
@@ -177,18 +178,16 @@ SELECT pg_column_compression('cmaltertest', 'f1');
 SELECT pg_column_compression('cmaltertest', 'f2');
 
 SELECT acname, acattnum, acoptions FROM pg_attr_compression
-	WHERE acrelid = 'cmaltertest'::regclass OR acrelid = 'cmtest'::regclass;
+	WHERE acrelid = 'cmaltertest'::REGCLASS OR acrelid = 'cmtest'::REGCLASS;
 
 -- zlib compression
 CREATE TABLE zlibtest(f1 TEXT COMPRESSION zlib WITH (invalid 'param'));
 CREATE TABLE zlibtest(f1 TEXT COMPRESSION zlib WITH (level 'best'));
 CREATE TABLE zlibtest(f1 TEXT COMPRESSION zlib);
 ALTER TABLE zlibtest
-	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level 'best_compression');
+	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level '9');
 ALTER TABLE zlibtest
-	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level 'best_speed');
-ALTER TABLE zlibtest
-	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level 'default');
+	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level '1');
 ALTER TABLE zlibtest
 	ALTER COLUMN f1 SET COMPRESSION zlib WITH (dict 'one');
 INSERT INTO zlibtest VALUES(repeat('1234567890',1004));

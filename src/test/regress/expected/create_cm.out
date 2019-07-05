@@ -20,7 +20,7 @@ CREATE ACCESS METHOD pglz1 TYPE COMPRESSION HANDLER pglzhandler;
 CREATE ACCESS METHOD pglz2 TYPE COMPRESSION HANDLER pglzhandler;
 CREATE TABLE cmaltertest (f1 TEXT COMPRESSION pglz2);
 SELECT acname, acattnum, acoptions FROM pg_attr_compression
-	WHERE acrelid = 'cmaltertest'::regclass;
+	WHERE acrelid = 'cmaltertest'::REGCLASS;
  acname | acattnum | acoptions 
 --------+----------+-----------
  pglz2  |        1 | 
@@ -28,7 +28,7 @@ SELECT acname, acattnum, acoptions FROM pg_attr_compression
 
 ALTER TABLE cmaltertest DROP COLUMN f1;
 SELECT acname, acattnum, acoptions FROM pg_attr_compression
-	WHERE acrelid = 'cmaltertest'::regclass;
+	WHERE acrelid = 'cmaltertest'::REGCLASS;
  acname | acattnum | acoptions 
 --------+----------+-----------
 (0 rows)
@@ -59,7 +59,7 @@ SELECT pg_column_compression('cmaltertest', 'at1');
 (1 row)
 
 SELECT acname, acattnum, acoptions FROM pg_attr_compression
-	WHERE acrelid = 'cmaltertest'::regclass;
+	WHERE acrelid = 'cmaltertest'::REGCLASS;
  acname | acattnum | acoptions 
 --------+----------+-----------
 (0 rows)
@@ -125,15 +125,16 @@ CREATE TABLE cmtest(f1 TEXT);
 CREATE VIEW cmtest_deps AS
 	SELECT classid, objsubid, refclassid, refobjsubid, deptype
 	FROM pg_depend
-	WHERE (refclassid = 4001 OR classid = 4001) AND
-		  (objid = 'cmtest'::regclass OR refobjid = 'cmtest'::regclass)
+	WHERE (refclassid = 'pg_catalog.pg_attr_compression'::REGCLASS OR
+            classid = 'pg_catalog.pg_attr_compression'::REGCLASS) AND
+		  (objid = 'cmtest'::REGCLASS OR refobjid = 'cmtest'::REGCLASS)
 	ORDER by objid, refobjid;
 INSERT INTO cmtest VALUES(repeat('1234567890',1001));
 -- one normal dependency
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    1259 |        1 |       4001 |           0 | n
+    1259 |        1 |       4189 |           0 | n
 (1 row)
 
 -- check decompression
@@ -177,8 +178,8 @@ SELECT pg_column_compression('cmtest', 'f1');
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    1259 |        1 |       4001 |           0 | n
-    4001 |        0 |       1259 |           1 | i
+    1259 |        1 |       4189 |           0 | n
+    4189 |        0 |       1259 |           1 | i
 (2 rows)
 
 -- rewrite
@@ -196,15 +197,15 @@ SELECT length(f1) FROM cmtest;
 SELECT pg_column_compression('cmtest', 'f1');
  pg_column_compression 
 -----------------------
- pglz2, pglz1
+ pglz1, pglz2
 (1 row)
 
 -- two internal dependencies
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    4001 |        0 |       1259 |           1 | i
-    4001 |        0 |       1259 |           1 | i
+    4189 |        0 |       1259 |           1 | i
+    4189 |        0 |       1259 |           1 | i
 (2 rows)
 
 -- rewrite
@@ -230,7 +231,7 @@ SELECT pg_column_compression('cmtest', 'f1');
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    1259 |        1 |       4001 |           0 | n
+    1259 |        1 |       4189 |           0 | n
 (1 row)
 
 -- no rewrites
@@ -243,9 +244,9 @@ INSERT INTO cmtest VALUES(repeat('1234567890',1006));
 SELECT * FROM cmtest_deps;
  classid | objsubid | refclassid | refobjsubid | deptype 
 ---------+----------+------------+-------------+---------
-    1259 |        1 |       4001 |           0 | n
-    4001 |        0 |       1259 |           1 | i
-    4001 |        0 |       1259 |           1 | i
+    1259 |        1 |       4189 |           0 | n
+    4189 |        0 |       1259 |           1 | i
+    4189 |        0 |       1259 |           1 | i
 (3 rows)
 
 -- remove function and related event trigger
@@ -346,7 +347,7 @@ SELECT pg_column_compression('cmaltertest', 'f1');
 SELECT pg_column_compression('cmaltertest', 'f2');
  pg_column_compression 
 -----------------------
- pglz, pglz2, pglz1
+ pglz, pglz1, pglz2
 (1 row)
 
 -- make pglz2 droppable
@@ -364,7 +365,7 @@ SELECT pg_column_compression('cmaltertest', 'f2');
 (1 row)
 
 SELECT acname, acattnum, acoptions FROM pg_attr_compression
-	WHERE acrelid = 'cmaltertest'::regclass OR acrelid = 'cmtest'::regclass;
+	WHERE acrelid = 'cmaltertest'::REGCLASS OR acrelid = 'cmtest'::REGCLASS;
  acname | acattnum |       acoptions       
 --------+----------+-----------------------
  pglz1  |        1 | 
@@ -377,14 +378,12 @@ SELECT acname, acattnum, acoptions FROM pg_attr_compression
 CREATE TABLE zlibtest(f1 TEXT COMPRESSION zlib WITH (invalid 'param'));
 ERROR:  unexpected parameter for zlib: "invalid"
 CREATE TABLE zlibtest(f1 TEXT COMPRESSION zlib WITH (level 'best'));
-ERROR:  unexpected value for zlib compression level: "best"
+ERROR:  invalid input syntax for type integer: "best"
 CREATE TABLE zlibtest(f1 TEXT COMPRESSION zlib);
 ALTER TABLE zlibtest
-	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level 'best_compression');
+	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level '9');
 ALTER TABLE zlibtest
-	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level 'best_speed');
-ALTER TABLE zlibtest
-	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level 'default');
+	ALTER COLUMN f1 SET COMPRESSION zlib WITH (level '1');
 ALTER TABLE zlibtest
 	ALTER COLUMN f1 SET COMPRESSION zlib WITH (dict 'one');
 ERROR:  zlib dictionary is too small

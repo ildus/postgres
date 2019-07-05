@@ -44,12 +44,14 @@ zlib_cmcheck(Form_pg_attribute att, List *options)
 
 		if (strcmp(def->defname, "level") == 0)
 		{
-			if (strcmp(defGetString(def), "best_speed") != 0 &&
-				strcmp(defGetString(def), "best_compression") != 0 &&
-				strcmp(defGetString(def), "default") != 0)
+			int8 level = pg_atoi(defGetString(def), sizeof(int8), 0);
+			if (level < 0 || level > 9)
 				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("unexpected value for zlib compression level: \"%s\"", defGetString(def))));
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("unexpected value for zlib compression level: \"%s\"",
+								defGetString(def)),
+					 errhint("expected value between 0 and 9")
+					));
 		}
 		else if (strcmp(def->defname, "dict") == 0)
 		{
@@ -98,12 +100,7 @@ zlib_cminitstate(Oid acoid, List *options)
 			DefElem    *def = (DefElem *) lfirst(lc);
 
 			if (strcmp(def->defname, "level") == 0)
-			{
-				if (strcmp(defGetString(def), "best_speed") == 0)
-					state->level = Z_BEST_SPEED;
-				else if (strcmp(defGetString(def), "best_compression") == 0)
-					state->level = Z_BEST_COMPRESSION;
-			}
+				state->level = pg_atoi(defGetString(def), sizeof(int), 0);
 			else if (strcmp(def->defname, "dict") == 0)
 			{
 				char   *val,
