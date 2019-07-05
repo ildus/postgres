@@ -145,7 +145,7 @@ pglz_cmdecompress(CompressionAmOptions *cmoptions, const struct varlena *value)
 						VARDATA(result),
 						VARRAWSIZE_4B_C(value), true);
 
-    if (rawsize < 0)
+	if (rawsize < 0)
 		elog(ERROR, "pglz: compressed data is corrupted");
 
 	SET_VARSIZE(result, rawsize + VARHDRSZ);
@@ -154,7 +154,7 @@ pglz_cmdecompress(CompressionAmOptions *cmoptions, const struct varlena *value)
 
 static struct varlena *
 pglz_cmdecompress_slice(CompressionAmOptions *cmoptions, const struct varlena *value,
-                            int32 slicelength)
+							int32 slicelength)
 {
 	struct varlena *result;
 	int32		rawsize;
